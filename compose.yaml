@@ -1,0 +1,19 @@
+services:
+  worm:
+    container_name: worm
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: worm:latest
+    restart: unless-stopped
+    volumes:
+      - ./:/usr/src/worm
+      - cargo-cache:/usr/local/cargo
+    environment:
+      - RUST_LOG=info
+    env_file:
+      - .env
+    tty: true
+
+volumes:
+  cargo-cache:
