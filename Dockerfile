@@ -19,14 +19,15 @@ COPY . .
 
 RUN cargo build --release
 
-
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
-    ca-certificate \
+    ca-certificates \
     libssl-dev \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
+
+RUN update-ca-certificates
 
 RUN useradd -m -u 1001 appuser
 
