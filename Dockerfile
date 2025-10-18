@@ -1,4 +1,4 @@
-FROM rust:1.75-slim AS builder
+FROM rust:1.81-slim AS builder
 LABEL authors="tigfi"
 
 RUN apt-get update && apt-get install -y \
