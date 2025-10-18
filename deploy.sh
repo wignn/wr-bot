@@ -12,16 +12,16 @@ echo "🚀 Starting deployment for $APP_NAME..."
 
 # Stop and remove existing container
 echo "📦 Stopping existing container..."
-docker stop $CONTAINER_NAME 2>/dev/null || true
-docker rm $CONTAINER_NAME 2>/dev/null || true
+sudo docker stop $CONTAINER_NAME 2>/dev/null || true
+sudo docker rm $CONTAINER_NAME 2>/dev/null || true
 
 # Build image
 echo "🔨 Building Docker image..."
-docker build -t $IMAGE_NAME:$VERSION -t $IMAGE_NAME:latest .
+sudo docker build -t $IMAGE_NAME:$VERSION -t $IMAGE_NAME:latest .
 
 # Run container
 echo "▶️  Starting container..."
-docker run -d \
+sudo docker run -d \
   --name $CONTAINER_NAME \
   --restart unless-stopped \
   --env-file .env \
@@ -30,7 +30,7 @@ docker run -d \
 # Check status
 echo "✅ Checking container status..."
 sleep 2
-docker ps | grep $CONTAINER_NAME
+sudo docker ps | grep $CONTAINER_NAME
 
 echo "🎉 Deployment completed!"
 echo "📊 View logs: docker logs -f $CONTAINER_NAME"
