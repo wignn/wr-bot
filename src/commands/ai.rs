@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::error::BotError;
-use crate::utils::ai::Ai;
+use crate::services::ai::Ai;
 use poise::CreateReply;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;

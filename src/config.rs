@@ -9,6 +9,7 @@ pub struct Config {
     pub model_ai: String,
     pub base_url: String,
     pub prompt: String,
+    pub scraper_url: String
 }
 
 impl Config {
@@ -18,6 +19,7 @@ impl Config {
             .map_err(|e| format!("Failed to read prompt file '{}': {}", prompt_file, e))?;
 
         Ok(Self {
+            scraper_url: env::var("SCRAPER_URL").expect("SCRAPER_URL not configure"),
             api_key: env::var("API_KEY").expect("API_KEY not configured"),
             token: env::var("TOKEN").expect("TOKEN not configured"),
             client_id: env::var("CLIENT_ID").expect("CLIENT_ID not configured"),
