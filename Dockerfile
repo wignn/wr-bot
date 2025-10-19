@@ -1,5 +1,5 @@
 # Stage 1: Builder
-FROM rust:1.83-slim AS builder
+FROM rust:slim AS builder
 
 # Install dependencies yang diperlukan untuk build
 RUN apt-get update && apt-get install -y \
