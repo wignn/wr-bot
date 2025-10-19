@@ -1,13 +1,11 @@
 # Stage 1: Builder
 FROM rust:slim AS builder
 
-# Install dependencies yang diperlukan untuk build
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
@@ -22,6 +20,7 @@ ENV CARGO_PROFILE_RELEASE_STRIP=true
 
 RUN cargo build --release
 
+# Stage 2: Runtime
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
