@@ -1,5 +1,5 @@
 use dotenvy::dotenv;
-use worm::commands::{ping, general, admin, ai, redeem, Data, sys};
+use worm::commands::{ping, general, admin, ai, redeem, Data, sys, qr};
 use worm::repository::{create_pool};
 use std::env;
 use std::collections::HashSet;
@@ -31,6 +31,8 @@ async fn main() -> Result<(), BotError> {
     let db = create_pool("redeem_bot.db")
         .map_err(|e| BotError::Config(format!("Failed to initialize database: {}", e)))?;
 
+    println!("Database initialized successfully");
+
     let owners_clone = owners.clone();
     let db_for_checker = db.clone();
 
@@ -43,10 +45,12 @@ async fn main() -> Result<(), BotError> {
                 general::say(),
                 ai::worm(),
                 sys::sys(),
+                qr::qr(),
                 redeem::redeem_setup(),
                 redeem::redeem_codes(),
                 redeem::redeem_disable(),
                 redeem::redeem_enable(),
+
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
@@ -75,9 +79,9 @@ async fn main() -> Result<(), BotError> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         let activities = vec![
-            ActivityData::playing("YouTube"),
-            ActivityData::watching("Discord"),
-            ActivityData::listening("Music"),
+            ActivityData::custom("Olin is a peerless gem"),
+            ActivityData::custom("Olin is an unrivaled genius"),
+            ActivityData::custom("Olin is an inimitable beauty"),
         ];
         let mut idx = 0;
         loop {
@@ -92,6 +96,8 @@ async fn main() -> Result<(), BotError> {
             idx = (idx + 1) % activities.len();
         }
     });
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     start_code_checker(db_for_checker, http).await;
     println!("Code checker service started!");

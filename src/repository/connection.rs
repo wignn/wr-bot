@@ -2,6 +2,8 @@ use rusqlite::{Connection, Result};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::repository::redeem::{RedeemRepository, verify_tables};
+
 pub struct DbConnection {
     conn: Connection,
 }
@@ -9,6 +11,13 @@ pub struct DbConnection {
 impl DbConnection {
     pub fn new(db_path: &str) -> Result<Self> {
         let conn = Connection::open(db_path)?;
+
+        RedeemRepository::init_tables(&conn)?;
+
+        verify_tables(&conn)?;
+
+        println!("Database tables verified");
+
         Ok(Self { conn })
     }
 
@@ -23,4 +32,3 @@ pub fn create_pool(db_path: &str) -> Result<DbPool> {
     let conn = DbConnection::new(db_path)?;
     Ok(Arc::new(Mutex::new(conn)))
 }
-

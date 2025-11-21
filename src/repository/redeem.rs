@@ -1,5 +1,39 @@
 use rusqlite::{Connection, Result};
 
+pub fn verify_tables(conn: &Connection) -> Result<()> {
+    let table_check: Result<i64> = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='redeem_codes'",
+        [],
+        |row| row.get(0),
+    );
+
+    match table_check {
+        Ok(count) if count > 0 => {
+            println!("✓ redeem_codes table exists");
+        }
+        _ => {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+    }
+
+    let server_check: Result<i64> = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='redeem_servers'",
+        [],
+        |row| row.get(0),
+    );
+
+    match server_check {
+        Ok(count) if count > 0 => {
+            println!("✓ redeem_servers table exists");
+        }
+        _ => {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub struct RedeemServer {
     pub id: u64,
@@ -14,7 +48,7 @@ pub struct RedeemCode {
     pub id: u64,
     pub game: String,
     pub code: String,
-    pub description: Option<String>,
+    pub rewards: Option<String>,
     pub expiry: Option<String>,
     pub created_at: i64,
 }
@@ -37,18 +71,24 @@ impl RedeemRepository {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS redeem_codes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game TEXT NOT NULL,
                 code TEXT UNIQUE NOT NULL,
-                rewards TEXT NOT NULL,
-                status TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                rewards TEXT,
+                expiry TEXT,
+                created_at INTEGER NOT NULL
             )",
             [],
         )?;
+
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_code ON redeem_codes(code)",
             [],
-        ).ok();
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_game ON redeem_codes(game)",
+            [],
+        )?;
 
         Ok(())
     }
@@ -86,7 +126,6 @@ impl RedeemRepository {
         Ok(servers)
     }
 
-
     pub fn disable_server(conn: &Connection, guild_id: u64) -> Result<()> {
         conn.execute(
             "UPDATE redeem_servers SET is_active = 0 WHERE guild_id = ?1",
@@ -107,7 +146,7 @@ impl RedeemRepository {
         conn: &Connection,
         game: &str,
         code: &str,
-        description: Option<&str>,
+        rewards: Option<&str>,
         expiry: Option<&str>,
     ) -> Result<()> {
         let now = std::time::SystemTime::now()
@@ -116,9 +155,9 @@ impl RedeemRepository {
             .as_secs() as i64;
 
         conn.execute(
-            "INSERT OR IGNORE INTO redeem_codes (game, code, description, expiry, created_at)
+            "INSERT OR IGNORE INTO redeem_codes (game, code, rewards, expiry, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![game, code, description, expiry, now],
+            rusqlite::params![game, code, rewards, expiry, now],
         )?;
         Ok(())
     }
@@ -128,9 +167,10 @@ impl RedeemRepository {
         let count: i64 = stmt.query_row([code], |row| row.get(0))?;
         Ok(count > 0)
     }
+
     pub fn get_codes_by_game(conn: &Connection, game: &str) -> Result<Vec<RedeemCode>> {
         let mut stmt = conn.prepare(
-            "SELECT id, game, code, description, expiry, created_at
+            "SELECT id, game, code, rewards, expiry, created_at
              FROM redeem_codes
              WHERE game = ?1
              ORDER BY created_at DESC
@@ -143,7 +183,7 @@ impl RedeemRepository {
                     id: row.get(0)?,
                     game: row.get(1)?,
                     code: row.get(2)?,
-                    description: row.get(3)?,
+                    rewards: row.get(3)?,
                     expiry: row.get(4)?,
                     created_at: row.get(5)?,
                 })
@@ -167,4 +207,3 @@ impl RedeemRepository {
         )
     }
 }
-

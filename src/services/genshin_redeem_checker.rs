@@ -17,7 +17,7 @@ impl CodeCheckerService {
             scraper: GenshinCodeScraper::new(),
             db,
             http,
-            check_interval_secs: 300,
+            check_interval_secs: 300, 
         }
     }
 
@@ -118,10 +118,10 @@ impl CodeCheckerService {
 
         for code in codes {
             let embed = CreateEmbed::new()
-                .title("Kode Redeem Genshin Impact Baru!")
+                .title("🎁 Kode Redeem Genshin Impact Baru!")
                 .description(format!(
                     "Kode baru telah ditemukan! Segera redeem sebelum kadaluarsa.\n\n\
-                    **Kode:** `{}`\n\
+                    **Kode:** `{}`\n\n\
                     **Cara Redeem:**\n\
                     1. Buka [Genshin Impact Redeem](https://genshin.hoyoverse.com/en/gift)\n\
                     2. Login dengan akun Anda\n\
@@ -155,7 +155,7 @@ pub async fn start_code_checker(
     let checker = Arc::new(CodeCheckerService::new(db, http));
 
     tokio::spawn(async move {
-        println!("Code checker service started - monitoring every 5 minutes");
+        println!("✅ Code checker service started - monitoring every 5 minutes");
         checker.start_monitoring().await;
     });
 }
