@@ -31,7 +31,7 @@ RUN useradd -m -u 1000 worm
 WORKDIR /app
 
 COPY --from=builder /app/target/release/worm .
-COPY --from=builder /app/config.json /app/system-prompt.txt ./
+COPY --from=builder /app/system-prompt.txt ./
 
 RUN chown -R worm:worm /app
 
