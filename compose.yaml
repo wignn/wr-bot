@@ -21,9 +21,10 @@ services:
     container_name: lavalink
     image: ghcr.io/lavalink-devs/lavalink:4
     restart: unless-stopped
+    user: "0:0"  # Run as root to fix permission issues
     volumes:
       - ./lavalink/application.yml:/opt/Lavalink/application.yml
-      - ./lavalink/plugins:/opt/Lavalink/plugins
+      - lavalink-plugins:/opt/Lavalink/plugins
     env_file:
       - .env
     environment:
@@ -39,3 +40,4 @@ services:
 
 volumes:
   cargo-cache:
+  lavalink-plugins:
