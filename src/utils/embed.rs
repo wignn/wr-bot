@@ -95,3 +95,31 @@ pub fn added_to_queue(
 
     embed
 }
+
+pub fn playlist_added(
+    first_track_title: &str,
+    first_track_url: &str,
+    track_count: usize,
+    requester: &str,
+    artwork_url: Option<&str>,
+) -> CreateEmbed {
+    let mut embed = CreateEmbed::new()
+        .title("🎶 Playlist Added")
+        .description(format!(
+            "**[{}]({})** and **{} more tracks** added to queue",
+            first_track_title,
+            first_track_url,
+            track_count.saturating_sub(1)
+        ))
+        .field("Total Tracks", format!("{}", track_count), true)
+        .field("Requested by", requester, true)
+        .color(COLOR_MUSIC);
+
+    if let Some(art) = artwork_url {
+        if !art.is_empty() {
+            embed = embed.thumbnail(art);
+        }
+    }
+
+    embed
+}

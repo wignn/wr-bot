@@ -228,6 +228,12 @@ pub async fn play(
             send_embed(ctx, embed::error("Not Found", "Could not load this URL")).await?;
             return Ok(());
         }
+        
+        // Check if it's a playlist (more than one track)
+        if tracks.len() > 1 {
+            return play_playlist(ctx, player, guild_id, tracks).await;
+        }
+        
         return play_track(ctx, player, guild_id, &tracks[0]).await;
     }
 
@@ -253,6 +259,87 @@ pub async fn play(
         return Ok(());
     }
     play_track(ctx, player, guild_id, &tracks[0]).await
+}
+
+/// Play a playlist - adds all tracks to queue
+async fn play_playlist(
+    ctx: Context<'_>,
+    player: &crate::services::music::MusicPlayer,
+    guild_id: poise::serenity_prelude::GuildId,
+    tracks: Vec<lavalink_rs::model::track::TrackData>,
+) -> Result<(), Error> {
+    let track_count = tracks.len();
+    
+    player.set_text_channel(guild_id, ctx.channel_id());
+    
+    // Get current queue state before adding
+    let queue_before = player.get_queue(guild_id);
+    let was_empty = queue_before.current.is_none() && queue_before.is_empty();
+    
+    // Add all tracks to queue
+    for track in &tracks {
+        let queued_track = QueuedTrack {
+            track: track.clone(),
+            requester_id: ctx.author().id.get(),
+            requester_name: ctx.author().name.clone(),
+        };
+        player.add_to_queue(guild_id, queued_track);
+    }
+    
+    // If queue was empty, start playing the first track
+    if was_empty {
+        if let Some(player_ctx) = player.get_player_context(guild_id) {
+            if let Some(first_track) = player.next_track(guild_id) {
+                println!("[MUSIC] Playing first track from playlist: {}", first_track.track.info.title);
+                
+                match player_ctx.play(&first_track.track).await {
+                    Ok(player_info) => {
+                        println!(
+                            "[MUSIC] Playlist playback started, player state: {:?}",
+                            player_info.state
+                        );
+                        player.set_current(guild_id, Some(first_track.clone()));
+                        
+                        // Send now playing embed for first track
+                        let first_info = &first_track.track.info;
+                        send_embed(
+                            ctx,
+                            embed::playlist_added(
+                                &first_info.title,
+                                &first_info.uri.clone().unwrap_or_default(),
+                                track_count,
+                                &ctx.author().name,
+                                first_info.artwork_url.as_deref(),
+                            ),
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("[MUSIC] Failed to play playlist: {}", e);
+                        send_embed(ctx, embed::error("Playback Error", &format!("{}", e))).await?;
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+    
+    // If something was already playing, just show added message
+    let first_track = tracks.first().map(|t| &t.info);
+    send_embed(
+        ctx,
+        embed::playlist_added(
+            first_track.map(|i| i.title.as_str()).unwrap_or("Unknown"),
+            first_track.and_then(|i| i.uri.as_deref()).unwrap_or(""),
+            track_count,
+            &ctx.author().name,
+            first_track.and_then(|i| i.artwork_url.as_deref()),
+        ),
+    )
+    .await?;
+    
+    Ok(())
 }
 
 async fn play_track(
