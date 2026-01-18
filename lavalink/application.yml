@@ -43,22 +43,19 @@ lavalink:
     youtubeSearchEnabled: true
     soundcloudSearchEnabled: true
     gc-warnings: true
-
+  
 plugins:
   youtube:
     enabled: true
     allowSearch: true
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
+    apiKey: ${YOUTUBE_API_KEY:}
     clients:
-      - MUSIC
+      - ANDROID_MUSIC
+      - ANDROID_VR
       - WEB
-      - WEBEMBEDDED
       - TVHTML5EMBEDDED
-      - MWEB
-    oauth:
-      enabled: true
-      refreshToken: ${YOUTUBE_OAUTH_REFRESH_TOKEN:}
   lavasrc:
     providers:
       - "ytsearch:\"%ISRC%\""
