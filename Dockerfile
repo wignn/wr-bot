@@ -10,7 +10,7 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 
 COPY src ./src
-COPY config.json system-prompt.txt ./
+COPY system-prompt.txt ./
 
 ENV CARGO_PROFILE_RELEASE_LTO=true
 ENV CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
