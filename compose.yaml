@@ -4,7 +4,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: client:latest
+    image: wign/bot-discord:latest
     restart: unless-stopped
     volumes:
       - ./:/usr/src/client
@@ -24,6 +24,8 @@ services:
     volumes:
       - ./lavalink/application.yml:/opt/Lavalink/application.yml
       - ./lavalink/plugins:/opt/Lavalink/plugins
+    env_file:
+      - .env
     environment:
       - _JAVA_OPTIONS=-Xmx512M
       - SERVER_PORT=2333

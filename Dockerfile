@@ -1,8 +1,5 @@
 FROM rust:slim AS builder
 
-ENV CARGO_BUILD_JOBS=1
-ENV RUSTFLAGS="-C debuginfo=0"
-
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
@@ -13,11 +10,10 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 
 RUN mkdir src && echo "fn main() {}" > src/main.rs
-RUN cargo build --release
+RUN cargo build --release || true
 RUN rm -rf src
 
 COPY src ./src
-
 COPY system-prompt.txt ./
 
 RUN cargo build --release
