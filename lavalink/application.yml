@@ -50,12 +50,15 @@ plugins:
     allowSearch: true
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
-    apiKey: ${YOUTUBE_API_KEY:}
     clients:
-      - ANDROID_MUSIC
-      - ANDROID_VR
+      - MUSIC
       - WEB
+      - WEBEMBEDDED
       - TVHTML5EMBEDDED
+      - MWEB
+    oauth:
+      enabled: true
+      refreshToken: ${YOUTUBE_OAUTH_REFRESH_TOKEN:}
   lavasrc:
     providers:
       - "ytsearch:\"%ISRC%\""
