@@ -43,7 +43,7 @@ lavalink:
     youtubeSearchEnabled: true
     soundcloudSearchEnabled: true
     gc-warnings: true
-  
+
 plugins:
   youtube:
     enabled: true
@@ -54,6 +54,7 @@ plugins:
     clients:
       - ANDROID_MUSIC
       - ANDROID_VR
+      - ANDROID
       - WEB
       - TVHTML5EMBEDDED
   lavasrc:
