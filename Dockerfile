@@ -9,13 +9,12 @@ WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
 
+RUN mkdir src && echo "fn main() {}" > src/main.rs
+RUN cargo build --release || true
+RUN rm -rf src
+
 COPY src ./src
 COPY system-prompt.txt ./
-
-ENV CARGO_PROFILE_RELEASE_LTO=true
-ENV CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
-ENV CARGO_PROFILE_RELEASE_OPT_LEVEL=z
-ENV CARGO_PROFILE_RELEASE_STRIP=true
 
 RUN cargo build --release
 
@@ -36,7 +35,6 @@ COPY --from=builder /app/system-prompt.txt ./
 RUN chown -R worm:worm /app
 
 USER worm
-
 
 CMD ["./worm"]
 
