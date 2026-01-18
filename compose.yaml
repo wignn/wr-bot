@@ -1,19 +1,39 @@
 services:
-  worm:
-    container_name: worm
+  client:
+    container_name: client
     build:
       context: .
       dockerfile: Dockerfile
-    image: worm:latest
+    image: client:latest
     restart: unless-stopped
     volumes:
-      - ./:/usr/src/worm
+      - ./:/usr/src/client
       - cargo-cache:/usr/local/cargo
     environment:
       - RUST_LOG=info
     env_file:
       - .env
     tty: true
+    depends_on:
+      - lavalink
+
+  lavalink:
+    container_name: lavalink
+    image: ghcr.io/lavalink-devs/lavalink:4
+    restart: unless-stopped
+    volumes:
+      - ./lavalink/application.yml:/opt/Lavalink/application.yml
+      - ./lavalink/plugins:/opt/Lavalink/plugins
+    environment:
+      - _JAVA_OPTIONS=-Xmx512M
+      - SERVER_PORT=2333
+    ports:
+      - "2333:2333"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2333/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   cargo-cache:

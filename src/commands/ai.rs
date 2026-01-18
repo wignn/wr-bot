@@ -24,35 +24,52 @@ fn split_into_chunks(s: &str, max: usize) -> Vec<String> {
     chunks
 }
 
-#[poise::command(prefix_command, aliases("worm", "wr"))]
+/// Chat dengan AI WormGPT
+#[poise::command(prefix_command, slash_command, aliases("worm", "wr"))]
 pub async fn worm(
     ctx: Context<'_>,
-    #[rest] text: String
+    #[rest]
+    #[description = "Pertanyaan untuk AI"]
+    text: String,
 ) -> Result<(), Error> {
     let config = Config::from_env()
         .map_err(|e| BotError::Config(format!("Failed to load config: {}", e)))?;
 
-    let mut ai = Ai::new(config.base_url, config.api_key, config.model_ai, config.prompt);
+    // Check if AI is enabled
+    let api_key = match &config.api_key {
+        Some(key) => key.clone(),
+        None => {
+            ctx.say("❌ Fitur AI belum dikonfigurasi. Harap set `API_KEY` di environment.")
+                .await?;
+            return Ok(());
+        }
+    };
 
-    let loading_msg = ctx.say("Loading...").await?;
+    let mut ai = Ai::new(config.base_url, api_key, config.model_ai, config.prompt);
+
+    let loading_msg = ctx.say("⏳ Memproses...").await?;
 
     let response = ai.call_api(text).await.map_err(|e| e.to_string());
 
-    let content = response.unwrap_or_else(|e| format!("Error: {}", e));
+    let content = response.unwrap_or_else(|e| format!("❌ Error: {}", e));
 
     const DISCORD_MAX_LEN: usize = 2000;
-    const CHUNK_MAX: usize = 1900; // leave headroom for any extra formatting
+    const CHUNK_MAX: usize = 1900;
 
     if content.len() <= DISCORD_MAX_LEN {
-        loading_msg.edit(ctx, CreateReply::default().content(content)).await?;
+        loading_msg
+            .edit(ctx, CreateReply::default().content(content))
+            .await?;
     } else {
         loading_msg
-            .edit(ctx, CreateReply::default().content("Response too long; sending in multiple messages..."))
+            .edit(
+                ctx,
+                CreateReply::default()
+                    .content("📜 Response terlalu panjang, mengirim dalam beberapa pesan..."),
+            )
             .await?;
         let chunks = split_into_chunks(&content, CHUNK_MAX);
         for chunk in chunks {
-            // Send each chunk as a normal message
-            // Use ctx.say so messages appear as bot messages in the same channel
             ctx.say(chunk).await?;
         }
     }

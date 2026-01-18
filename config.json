@@ -1,5 +1,0 @@
-{
-  "base_url": "https://openrouter.ai/api/v1",
-  "model": "tngtech/deepseek-r1t2-chimera:free",
-  "language": "Indonesian"
-}

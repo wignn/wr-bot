@@ -1,4 +1,3 @@
-# Stage 1: Builder
 FROM rust:slim AS builder
 
 RUN apt-get update && apt-get install -y \
@@ -20,7 +19,6 @@ ENV CARGO_PROFILE_RELEASE_STRIP=true
 
 RUN cargo build --release
 
-# Stage 2: Runtime
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
