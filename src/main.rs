@@ -7,7 +7,7 @@ use serenity::all::{ActivityData, GatewayIntents, OnlineStatus};
 use songbird::SerenityInit;
 use std::collections::HashSet;
 use std::env;
-use worm::commands::{admin, ai, general, moderation, music, ping, redeem, sys, Data};
+use worm::commands::{admin, ai, forex, general, moderation, music, ping, redeem, sys, Data};
 use worm::config::Config;
 use worm::error::BotError;
 use worm::handlers::{handle_event, handle_track_end, on_error};
@@ -112,6 +112,12 @@ async fn main() -> Result<(), BotError> {
                 // Logging commands
                 moderation::log_setup(),
                 moderation::log_disable(),
+                // Forex commands
+                forex::forex_setup(),
+                forex::forex_disable(),
+                forex::forex_enable(),
+                forex::forex_status(),
+                forex::forex_calendar(),
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
@@ -220,8 +226,12 @@ async fn main() -> Result<(), BotError> {
 
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-    start_code_checker(db_for_checker, http).await;
+    start_code_checker(db_for_checker.clone(), http.clone()).await;
     println!("[OK] Code checker service started!");
+
+    // Start forex news service
+    worm::services::forex::start_forex_service(db_for_checker, http).await;
+    println!("[OK] Forex news service started!");
 
     client
         .start()
