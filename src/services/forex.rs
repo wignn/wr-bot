@@ -1,12 +1,52 @@
 use crate::repository::{DbPool, ForexRepository};
+use crate::config::Config;
 use chrono::{DateTime, Utc};
 use chrono_tz::Asia::Jakarta;
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use serenity::all::{ChannelId, Color, CreateEmbed, CreateEmbedFooter, CreateMessage, Http};
 use std::sync::Arc;
 use tokio::time::{interval, Duration};
 
 const FXSTREET_RSS: &str = "https://www.fxstreet-id.com/rss/news";
+const FXSTREET_ANALYSIS_RSS: &str = "https://www.fxstreet-id.com/rss/analysis";
+const DAILY_FOREX: &str ="https://www.dailyforex.com/rss/technicalanalysis.xml";
+
+// Gemini API structs for translation
+#[derive(Serialize)]
+struct GeminiRequest {
+    contents: Vec<GeminiContent>,
+}
+
+#[derive(Serialize)]
+struct GeminiContent {
+    parts: Vec<GeminiPart>,
+}
+
+#[derive(Serialize)]
+struct GeminiPart {
+    text: String,
+}
+
+#[derive(Deserialize)]
+struct GeminiResponse {
+    candidates: Option<Vec<GeminiCandidate>>,
+}
+
+#[derive(Deserialize)]
+struct GeminiCandidate {
+    content: GeminiCandidateContent,
+}
+
+#[derive(Deserialize)]
+struct GeminiCandidateContent {
+    parts: Vec<GeminiResponsePart>,
+}
+
+#[derive(Deserialize)]
+struct GeminiResponsePart {
+    text: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct ForexNews {
@@ -57,10 +97,22 @@ pub struct ForexService {
     db: DbPool,
     http: Arc<Http>,
     check_interval_secs: u64,
+    gemini_api_key: Option<String>,
 }
 
 impl ForexService {
     pub fn new(db: DbPool, http: Arc<Http>) -> Self {
+        // Load Gemini API key for translation
+        let gemini_api_key = Config::from_env()
+            .ok()
+            .and_then(|c| {
+                if c.gemini_api_key != "api_key" {
+                    Some(c.gemini_api_key)
+                } else {
+                    None
+                }
+            });
+        
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(30))
@@ -70,6 +122,7 @@ impl ForexService {
             db,
             http,
             check_interval_secs: 30,
+            gemini_api_key,
         }
     }
 
@@ -88,9 +141,25 @@ impl ForexService {
     }
 
     async fn check_for_news(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let news_items = self.fetch_fxstreet().await?;
+        // Fetch from all sources
+        let mut all_news = Vec::new();
+        
+        match self.fetch_fxstreet().await {
+            Ok(news) => all_news.extend(news),
+            Err(e) => eprintln!("[FOREX] Error fetching FXStreet News: {}", e),
+        }
+        
+        match self.fetch_fxstreet_analysis().await {
+            Ok(news) => all_news.extend(news),
+            Err(e) => eprintln!("[FOREX] Error fetching FXStreet Analysis: {}", e),
+        }
+        
+        match self.fetch_dailyforex().await {
+            Ok(news) => all_news.extend(news),
+            Err(e) => eprintln!("[FOREX] Error fetching DailyForex: {}", e),
+        }
 
-        if news_items.is_empty() {
+        if all_news.is_empty() {
             return Ok(());
         }
 
@@ -98,7 +167,7 @@ impl ForexService {
         let conn = db_lock.get_connection();
 
         let mut new_items = Vec::new();
-        for item in &news_items {
+        for item in &all_news {
             if !ForexRepository::is_news_sent(conn, &item.id)? {
                 new_items.push(item.clone());
             }
@@ -115,7 +184,14 @@ impl ForexService {
             let conn = db_lock.get_connection();
 
             for item in &new_items {
-                ForexRepository::insert_news(conn, &item.id, "FXStreet")?;
+                let source = if item.id.starts_with("dailyforex") { 
+                    "DailyForex" 
+                } else if item.id.starts_with("fxstreet_analysis") {
+                    "FXStreet Analysis"
+                } else { 
+                    "FXStreet" 
+                };
+                ForexRepository::insert_news(conn, &item.id, source)?;
             }
         }
 
@@ -159,6 +235,131 @@ impl ForexService {
 
         println!("[FOREX] Fetched {} news from FXStreet ID", news.len());
         Ok(news)
+    }
+
+    async fn fetch_fxstreet_analysis(&self) -> Result<Vec<ForexNews>, Box<dyn std::error::Error + Send + Sync>> {
+        let response = self.client.get(FXSTREET_ANALYSIS_RSS).send().await?;
+        let body = response.text().await?;
+
+        let channel = rss::Channel::read_from(body.as_bytes())?;
+        let mut news = Vec::new();
+
+        for item in channel.items().iter().take(15) {
+            let title = item.title().unwrap_or_default().to_string();
+            let description = item.description().unwrap_or_default().to_string();
+            let link = item.link().map(|s| s.to_string());
+            let guid = item
+                .guid()
+                .map(|g| g.value().to_string())
+                .unwrap_or_else(|| title.clone());
+
+            let currency = Self::extract_currency(&title);
+            let impact = Self::determine_impact_analysis(&title, &description);
+
+            let time = item
+                .pub_date()
+                .and_then(|d| DateTime::parse_from_rfc2822(d).ok())
+                .map(|dt| dt.with_timezone(&Utc));
+
+            news.push(ForexNews {
+                title: Self::clean_html(&title),
+                description: Self::clean_html(&description),
+                currency,
+                impact,
+                time,
+                link,
+                id: format!("fxstreet_analysis_{}", Self::hash_string(&guid)),
+            });
+        }
+
+        println!("[FOREX] Fetched {} analysis from FXStreet ID", news.len());
+        Ok(news)
+    }
+
+    async fn fetch_dailyforex(&self) -> Result<Vec<ForexNews>, Box<dyn std::error::Error + Send + Sync>> {
+        let response = self.client.get(DAILY_FOREX).send().await?;
+        let body = response.text().await?;
+
+        let channel = rss::Channel::read_from(body.as_bytes())?;
+        let mut news = Vec::new();
+
+        for item in channel.items().iter().take(15) {
+            let title = item.title().unwrap_or_default().to_string();
+            let description = item.description().unwrap_or_default().to_string();
+            let link = item.link().map(|s| s.to_string());
+            let guid = link.clone().unwrap_or_else(|| title.clone());
+
+            let currency = Self::extract_currency(&title);
+            let impact = Self::determine_impact_analysis(&title, &description);
+
+            let time = item
+                .pub_date()
+                .and_then(|d| DateTime::parse_from_rfc2822(d).ok())
+                .map(|dt| dt.with_timezone(&Utc));
+
+            // Translate title and description to Indonesian
+            let (translated_title, translated_desc) = if self.gemini_api_key.is_some() {
+                let t_title = self.translate_to_indonesian(&title).await
+                    .unwrap_or_else(|_| Self::clean_html(&title));
+                let t_desc = self.translate_to_indonesian(&description).await
+                    .unwrap_or_else(|_| Self::clean_html(&description));
+                (t_title, t_desc)
+            } else {
+                (Self::clean_html(&title), Self::clean_html(&description))
+            };
+
+            news.push(ForexNews {
+                title: translated_title,
+                description: translated_desc,
+                currency,
+                impact,
+                time,
+                link,
+                id: format!("dailyforex_{}", Self::hash_string(&guid)),
+            });
+        }
+
+        println!("[FOREX] Fetched {} analysis from DailyForex", news.len());
+        Ok(news)
+    }
+
+    /// Translate text to Indonesian using Gemini API
+    async fn translate_to_indonesian(&self, text: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let api_key = self.gemini_api_key.as_ref()
+            .ok_or("Gemini API key not configured")?;
+
+        let prompt = format!(
+            "Terjemahkan teks berikut ke Bahasa Indonesia. Hanya berikan hasil terjemahan, tanpa penjelasan tambahan:\n\n{}",
+            text
+        );
+
+        let request = GeminiRequest {
+            contents: vec![GeminiContent {
+                parts: vec![GeminiPart { text: prompt }],
+            }],
+        };
+
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={}",
+            api_key
+        );
+
+        let response = self.client
+            .post(&url)
+            .json(&request)
+            .send()
+            .await?;
+
+        let gemini_response: GeminiResponse = response.json().await?;
+
+        let translated = gemini_response
+            .candidates
+            .and_then(|c| c.into_iter().next())
+            .and_then(|c| c.content.parts.into_iter().next())
+            .and_then(|p| p.text)
+            .ok_or("No translation received")?;
+
+        Ok(Self::clean_html(&translated))
     }
 
     async fn notify_news(&self, news: &[ForexNews]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -207,21 +408,39 @@ impl ForexService {
             news.description.clone()
         };
 
+        // Determine source from news ID
+        let is_dailyforex = news.id.starts_with("dailyforex");
+        let is_fxstreet_analysis = news.id.starts_with("fxstreet_analysis");
+        let source_name = if is_dailyforex { 
+            "DailyForex" 
+        } else if is_fxstreet_analysis {
+            "FXStreet"
+        } else { 
+            "FXStreet" 
+        };
+        
         let source_link = news
             .link
             .as_ref()
-            .map(|l| format!("[📖 Baca Selengkapnya]({})", l))
-            .unwrap_or_else(|| "FXStreet".to_string());
+            .map(|l| format!("[Baca Selengkapnya]({})", l))
+            .unwrap_or_else(|| source_name.to_string());
+
+        // Different title for analysis vs news
+        let embed_title = if is_dailyforex || is_fxstreet_analysis {
+            format!("{} TECHNICAL ANALYSIS", news.impact.label())
+        } else {
+            format!("{} FOREX NEWS", news.impact.label())
+        };
 
         let embed = CreateEmbed::new()
-            .title(format!("{} FOREX NEWS", news.impact.label()))
+            .title(embed_title)
             .color(news.impact.color())
             .field(&news.currency, &news.title, false)
             .field("", &desc, false)
             .field("Time", &time_str, true)
             .field("Impact", news.impact.bar(), true)
             .field("Source", &source_link, false)
-            .footer(CreateEmbedFooter::new("Forex News Alert"))
+            .footer(CreateEmbedFooter::new(format!("Forex Alert • {}", source_name)))
             .timestamp(serenity::all::Timestamp::now());
 
         let message = CreateMessage::new().embed(embed);
@@ -236,17 +455,39 @@ impl ForexService {
         // Check for currency pairs first
         let pairs = [
             ("EUR/USD", "EUR/USD"),
+            ("EURUSD", "EUR/USD"),
             ("GBP/USD", "GBP/USD"),
+            ("GBPUSD", "GBP/USD"),
             ("USD/JPY", "USD/JPY"),
+            ("USDJPY", "USD/JPY"),
             ("USD/CHF", "USD/CHF"),
+            ("USDCHF", "USD/CHF"),
             ("AUD/USD", "AUD/USD"),
+            ("AUDUSD", "AUD/USD"),
             ("NZD/USD", "NZD/USD"),
+            ("NZDUSD", "NZD/USD"),
             ("USD/CAD", "USD/CAD"),
+            ("USDCAD", "USD/CAD"),
             ("EUR/GBP", "EUR/GBP"),
+            ("EURGBP", "EUR/GBP"),
             ("EUR/JPY", "EUR/JPY"),
+            ("EURJPY", "EUR/JPY"),
             ("GBP/JPY", "GBP/JPY"),
+            ("GBPJPY", "GBP/JPY"),
+            ("GBP/CHF", "GBP/CHF"),
+            ("GBPCHF", "GBP/CHF"),
+            ("USD/MXN", "USD/MXN"),
+            ("USDMXN", "USD/MXN"),
+            ("USD/ZAR", "USD/ZAR"),
+            ("USDZAR", "USD/ZAR"),
             ("XAU/USD", "XAU/USD"),
+            ("XAUUSD", "XAU/USD"),
             ("XAG/USD", "XAG/USD"),
+            ("XAGUSD", "XAG/USD"),
+            ("BTC/USD", "BTC/USD"),
+            ("BTCUSD", "BTC/USD"),
+            ("ETH/USD", "ETH/USD"),
+            ("ETHUSD", "ETH/USD"),
         ];
 
         for (pair, label) in pairs {
@@ -279,6 +520,11 @@ impl ForexService {
             ("CANADIAN", "CAD"),
             ("LOONIE", "CAD"),
             ("CAD", "CAD"),
+            ("MEXICAN PESO", "MXN"),
+            ("MXN", "MXN"),
+            ("SOUTH AFRICAN RAND", "ZAR"),
+            ("RAND", "ZAR"),
+            ("ZAR", "ZAR"),
             ("GOLD", "XAU"),
             ("XAU", "XAU"),
             ("SILVER", "XAG"),
@@ -287,6 +533,19 @@ impl ForexService {
             ("CRUDE", "OIL"),
             ("WTI", "OIL"),
             ("BRENT", "OIL"),
+            ("BITCOIN", "BTC"),
+            ("BTC", "BTC"),
+            ("ETHEREUM", "ETH"),
+            ("ETH", "ETH"),
+            ("S&P 500", "S&P500"),
+            ("S&P500", "S&P500"),
+            ("SP500", "S&P500"),
+            ("NASDAQ", "NASDAQ"),
+            ("DAX", "DAX"),
+            ("TESLA", "TSLA"),
+            ("TSLA", "TSLA"),
+            ("COCA-COLA", "KO"),
+            ("COCACOLA", "KO"),
         ];
 
         for (keyword, curr) in currencies {
@@ -350,6 +609,66 @@ impl ForexService {
             "drop",
             "bullish",
             "bearish",
+        ];
+
+        for keyword in high_keywords {
+            if text.contains(keyword) {
+                return Impact::High;
+            }
+        }
+
+        for keyword in medium_keywords {
+            if text.contains(keyword) {
+                return Impact::Medium;
+            }
+        }
+
+        Impact::Low
+    }
+
+    /// Determine impact for technical analysis (DailyForex)
+    fn determine_impact_analysis(title: &str, description: &str) -> Impact {
+        let text = format!("{} {}", title, description).to_lowercase();
+
+        let high_keywords = [
+            "breakout",
+            "breakdown",
+            "all-time high",
+            "record high",
+            "crash",
+            "surge",
+            "plunge",
+            "major support",
+            "major resistance",
+            "key level",
+            "critical",
+            "urgent",
+            "bitcoin",
+            "btc",
+            "ethereum",
+            "eth",
+            "gold",
+            "xau",
+            "s&p 500",
+            "nasdaq",
+        ];
+
+        let medium_keywords = [
+            "bullish",
+            "bearish",
+            "signal",
+            "forecast",
+            "analysis",
+            "support",
+            "resistance",
+            "pattern",
+            "trend",
+            "momentum",
+            "target",
+            "rally",
+            "drop",
+            "dip",
+            "bounce",
         ];
 
         for keyword in high_keywords {

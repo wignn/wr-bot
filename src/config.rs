@@ -10,6 +10,8 @@ pub struct Config {
     pub base_url: String,
     pub prompt: String,
     pub scraper_url: String,
+    pub gemini_api_key: String,
+    pub gemini_prompt: String,
 }
 
 impl Config {
@@ -29,6 +31,12 @@ impl Config {
         let scraper_url =
             env::var("SCRAPER_URL").unwrap_or_else(|_| "https://api.ennead.cc/mihoyo".to_string());
 
+        let gemini_api_key = env::var("GEMINI_API_KEY").unwrap_or_else(|_| "api_key".to_string());
+
+        let gemini_prompt_file = "gemini_prompt.txt";
+        let gemini_prompt = fs::read_to_string(gemini_prompt_file)
+            .unwrap_or_else(|_| String::new());
+
         Ok(Self {
             token,
             client_id,
@@ -37,6 +45,8 @@ impl Config {
             base_url,
             prompt,
             scraper_url,
+            gemini_api_key,
+            gemini_prompt,
         })
     }
 

@@ -75,6 +75,17 @@ async fn main() -> Result<(), BotError> {
                 admin::everyone(),
                 // AI commands
                 ai::worm(),
+                // Gemini AI commands
+                ai::gemini(),
+                ai::gemini_chat(),
+                ai::gemini_clear(),
+                ai::gemini_vision(),
+                ai::gemini_summarize(),
+                ai::gemini_translate(),
+                ai::gemini_code(),
+                ai::gemini_explain(),
+                // Market Analysis commands (prefix only)
+                ai::analisa(),
                 // System commands
                 sys::sys(),
                 // Redeem commands
@@ -210,8 +221,12 @@ async fn main() -> Result<(), BotError> {
                 .filter_map(|guild_id| cache.guild(*guild_id))
                 .map(|g| g.member_count)
                 .sum();
+            let total_server: u64 = cache.guilds().len() as u64;
 
-            let activities = vec![ActivityData::custom(format!("With {} users", total_users))];
+            let activities = vec![
+                ActivityData::custom(format!("With {} users!", total_users)),
+                ActivityData::custom(format!("In {} server!", total_server)),
+                ];
 
             let runners = shard_manager.runners.lock().await;
             for (_, runner) in runners.iter() {
