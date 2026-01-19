@@ -111,3 +111,15 @@ impl YouTubeSearch {
         Ok(videos)
     }
 }
+
+use std::sync::OnceLock;
+
+static GLOBAL_YOUTUBE: OnceLock<YouTubeSearch> = OnceLock::new();
+
+pub fn init_global_youtube(youtube: YouTubeSearch) {
+    let _ = GLOBAL_YOUTUBE.set(youtube);
+}
+
+pub fn get_global_youtube() -> Option<&'static YouTubeSearch> {
+    GLOBAL_YOUTUBE.get()
+}

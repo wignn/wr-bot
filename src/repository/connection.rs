@@ -2,6 +2,7 @@ use rusqlite::{Connection, Result};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::repository::moderation::ModerationRepository;
 use crate::repository::redeem::{verify_tables, RedeemRepository};
 use crate::repository::reminder::ReminderRepository;
 
@@ -15,6 +16,7 @@ impl DbConnection {
         let conn = Connection::open(db_path)?;
         RedeemRepository::init_tables(&conn)?;
         ReminderRepository::init_tables(&conn)?;
+        ModerationRepository::init_tables(&conn)?;
         verify_tables(&conn)?;
         println!("Database tables initialized and verified");
         Ok(Self { conn })

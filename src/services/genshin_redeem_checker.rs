@@ -118,7 +118,7 @@ impl CodeCheckerService {
 
         for code in codes {
             let embed = CreateEmbed::new()
-                .title("🎁 Kode Redeem Genshin Impact Baru!")
+                .title("Kode Redeem Genshin Impact Baru!")
                 .description(format!(
                     "Kode baru telah ditemukan! Segera redeem sebelum kadaluarsa.\n\n\
                     **Kode:** `{}`\n\n\
@@ -155,7 +155,7 @@ pub async fn start_code_checker(
     let checker = Arc::new(CodeCheckerService::new(db, http));
 
     tokio::spawn(async move {
-        println!("✅ Code checker service started - monitoring every 5 minutes");
+        println!("Code checker service started - monitoring every 5 minutes");
         checker.start_monitoring().await;
     });
 }

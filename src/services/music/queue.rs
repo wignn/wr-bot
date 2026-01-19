@@ -9,6 +9,10 @@ pub struct MusicQueue {
     pub volume: u8,
     pub is_looping: bool,
     pub is_paused: bool,
+    pub is_autoplay: bool,
+    pub last_track_title: Option<String>,
+    pub last_video_id: Option<String>,
+    pub played_video_ids: VecDeque<String>, // History (max 20)
     pub text_channel_id: Option<ChannelId>,
 }
 
@@ -33,6 +37,10 @@ impl MusicQueue {
             volume: 100,
             is_looping: false,
             is_paused: false,
+            is_autoplay: false,
+            last_track_title: None,
+            last_video_id: None,
+            played_video_ids: VecDeque::with_capacity(20),
             text_channel_id: None,
         }
     }

@@ -1,12 +1,12 @@
 use crate::services::music::queue::{MusicQueue, QueuedTrack};
 use lavalink_rs::client::LavalinkClient;
 use lavalink_rs::model::track::TrackData;
+use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
 use serenity::all::{ChannelId, GuildId, Http, UserId};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
-use once_cell::sync::OnceCell;
 
 pub type GuildQueues = Arc<RwLock<HashMap<GuildId, MusicQueue>>>;
 
@@ -173,6 +173,69 @@ impl MusicPlayer {
         queues.get_mut(&guild_id)?.remove(index)
     }
 
+    pub fn set_autoplay(&self, guild_id: GuildId, enabled: bool) {
+        let mut queues = self.queues.write();
+        if let Some(queue) = queues.get_mut(&guild_id) {
+            queue.is_autoplay = enabled;
+        }
+    }
+
+    pub fn is_autoplay(&self, guild_id: GuildId) -> bool {
+        self.queues
+            .read()
+            .get(&guild_id)
+            .map(|q| q.is_autoplay)
+            .unwrap_or(false)
+    }
+
+    pub fn set_last_track_title(&self, guild_id: GuildId, title: Option<String>) {
+        let mut queues = self.queues.write();
+        if let Some(queue) = queues.get_mut(&guild_id) {
+            queue.last_track_title = title;
+        }
+    }
+
+    pub fn get_last_track_title(&self, guild_id: GuildId) -> Option<String> {
+        self.queues.read().get(&guild_id)?.last_track_title.clone()
+    }
+
+    pub fn set_last_video_id(&self, guild_id: GuildId, video_id: Option<String>) {
+        let mut queues = self.queues.write();
+        if let Some(queue) = queues.get_mut(&guild_id) {
+            queue.last_video_id = video_id;
+        }
+    }
+
+    pub fn get_last_video_id(&self, guild_id: GuildId) -> Option<String> {
+        self.queues.read().get(&guild_id)?.last_video_id.clone()
+    }
+
+    pub fn get_played_video_ids(&self, guild_id: GuildId) -> Vec<String> {
+        self.queues
+            .read()
+            .get(&guild_id)
+            .map(|q| q.played_video_ids.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn add_played_video_id(&self, guild_id: GuildId, video_id: String) {
+        let mut queues = self.queues.write();
+        if let Some(queue) = queues.get_mut(&guild_id) {
+            // Keep max 20 history items to prevent infinite growth
+            if queue.played_video_ids.len() >= 20 {
+                queue.played_video_ids.pop_front();
+            }
+            queue.played_video_ids.push_back(video_id);
+        }
+    }
+
+    pub fn clear_played_video_ids(&self, guild_id: GuildId) {
+        let mut queues = self.queues.write();
+        if let Some(queue) = queues.get_mut(&guild_id) {
+            queue.played_video_ids.clear();
+        }
+    }
+
     pub fn get_player_context(
         &self,
         guild_id: GuildId,
@@ -187,18 +250,39 @@ impl MusicPlayer {
         connection_info: lavalink_rs::model::player::ConnectionInfo,
     ) -> Result<lavalink_rs::player_context::PlayerContext, String> {
         let lavalink_guild_id = lavalink_rs::model::GuildId(guild_id.get());
-        
-        if let Some(ctx) = self.lavalink.get_player_context(lavalink_guild_id) {
-            return Ok(ctx);
+
+        if let Some(existing_ctx) = self.lavalink.get_player_context(lavalink_guild_id) {
+            match existing_ctx.get_player().await {
+                Ok(player) if player.state.connected => {
+                    println!(
+                        "[MUSIC] Reusing existing connected player for guild {}",
+                        guild_id.get()
+                    );
+                    return Ok(existing_ctx);
+                }
+                _ => {
+                    println!(
+                        "[MUSIC] Cleaning up stale player for guild {}",
+                        guild_id.get()
+                    );
+                    let _ = existing_ctx.close();
+                    let _ = self.lavalink.delete_player(lavalink_guild_id).await;
+                }
+            }
         }
 
+        println!("[MUSIC] Creating new player for guild {}", guild_id.get());
         self.lavalink
             .create_player_context(lavalink_guild_id, connection_info)
             .await
             .map_err(|e| format!("Failed to create player: {}", e))
     }
 
-    pub async fn search_tracks(&self, guild_id: GuildId, query: &str) -> Result<Vec<TrackData>, String> {
+    pub async fn search_tracks(
+        &self,
+        guild_id: GuildId,
+        query: &str,
+    ) -> Result<Vec<TrackData>, String> {
         let search_query = if query.starts_with("http://") || query.starts_with("https://") {
             query.to_string()
         } else {
@@ -223,7 +307,11 @@ impl MusicPlayer {
                         if tracks.is_empty() && !query.starts_with("http") {
                             println!("[DEBUG] Spotify returned no results, trying YouTube...");
                             let yt_query = format!("ytsearch:{}", query);
-                            match self.lavalink.load_tracks(lavalink_guild_id, &yt_query).await {
+                            match self
+                                .lavalink
+                                .load_tracks(lavalink_guild_id, &yt_query)
+                                .await
+                            {
                                 Ok(yt_loaded) => match yt_loaded.data {
                                     Some(TrackLoadData::Track(t)) => Ok(vec![t]),
                                     Some(TrackLoadData::Search(t)) => Ok(t),
@@ -243,7 +331,11 @@ impl MusicPlayer {
                         );
                         // Fallback to YouTube on error
                         let yt_query = format!("ytsearch:{}", query);
-                        match self.lavalink.load_tracks(lavalink_guild_id, &yt_query).await {
+                        match self
+                            .lavalink
+                            .load_tracks(lavalink_guild_id, &yt_query)
+                            .await
+                        {
                             Ok(yt_loaded) => match yt_loaded.data {
                                 Some(TrackLoadData::Track(t)) => Ok(vec![t]),
                                 Some(TrackLoadData::Search(t)) => Ok(t),

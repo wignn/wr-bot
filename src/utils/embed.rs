@@ -1,6 +1,5 @@
 use poise::serenity_prelude::CreateEmbed;
 
-
 pub const COLOR_SUCCESS: u32 = 0x2ECC71; // Green
 pub const COLOR_ERROR: u32 = 0xE74C3C; // Red
 pub const COLOR_WARNING: u32 = 0xF39C12; // Orange
@@ -80,7 +79,7 @@ pub fn added_to_queue(
     artwork_url: Option<&str>,
 ) -> CreateEmbed {
     let mut embed = CreateEmbed::new()
-        .title("✅ Added to Queue")
+        .title("Added to Queue")
         .description(format!("**[{}]({})**", title, url))
         .field("Duration", duration, true)
         .field("Position", format!("#{}", position), true)
@@ -119,6 +118,95 @@ pub fn playlist_added(
         if !art.is_empty() {
             embed = embed.thumbnail(art);
         }
+    }
+
+    embed
+}
+
+
+pub const COLOR_JOIN: u32 = 0x43B581; // Green for joins
+pub const COLOR_LEAVE: u32 = 0xF04747; // Red for leaves
+
+pub fn member_join(
+    username: &str,
+    user_id: u64,
+    account_created: &str,
+    member_count: u64,
+    avatar_url: Option<&str>,
+) -> CreateEmbed {
+    let mut embed = CreateEmbed::new()
+        .title("📥 Member Joined")
+        .description(format!(
+            "**User:** {} (`{}`)\n**Account Created:** {}\n**Member Count:** {}",
+            username, user_id, account_created, member_count
+        ))
+        .color(COLOR_JOIN);
+
+    if let Some(avatar) = avatar_url {
+        embed = embed.thumbnail(avatar);
+    }
+
+    embed
+}
+
+pub fn member_leave(
+    username: &str,
+    user_id: u64,
+    joined_at: Option<&str>,
+    member_count: u64,
+    avatar_url: Option<&str>,
+) -> CreateEmbed {
+    let joined_info = joined_at
+        .map(|j| format!("\n**Joined:** {}", j))
+        .unwrap_or_default();
+
+    let mut embed = CreateEmbed::new()
+        .title("📤 Member Left")
+        .description(format!(
+            "**User:** {} (`{}`){}\\n**Member Count:** {}",
+            username, user_id, joined_info, member_count
+        ))
+        .color(COLOR_LEAVE);
+
+    if let Some(avatar) = avatar_url {
+        embed = embed.thumbnail(avatar);
+    }
+
+    embed
+}
+
+
+pub fn voice_join(
+    username: &str,
+    _user_id: u64,
+    channel_name: &str,
+    avatar_url: Option<&str>,
+) -> CreateEmbed {
+    let mut embed = CreateEmbed::new()
+        .title("Joined Voice Channel")
+        .description(format!("**{}** joined **{}**", username, channel_name))
+        .color(COLOR_JOIN);
+
+    if let Some(avatar) = avatar_url {
+        embed = embed.thumbnail(avatar);
+    }
+
+    embed
+}
+
+pub fn voice_leave(
+    username: &str,
+    _user_id: u64,
+    channel_name: &str,
+    avatar_url: Option<&str>,
+) -> CreateEmbed {
+    let mut embed = CreateEmbed::new()
+        .title("🔇 Left Voice Channel")
+        .description(format!("**{}** left **{}**", username, channel_name))
+        .color(COLOR_LEAVE);
+
+    if let Some(avatar) = avatar_url {
+        embed = embed.thumbnail(avatar);
     }
 
     embed

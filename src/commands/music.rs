@@ -13,6 +13,24 @@ async fn send_embed(ctx: Context<'_>, embed: CreateEmbed) -> Result<(), Error> {
     Ok(())
 }
 
+/// Extract YouTube video ID from URL
+fn extract_video_id(url: &str) -> Option<String> {
+    if url.contains("youtu.be/") {
+        return url
+            .split("youtu.be/")
+            .nth(1)?
+            .split('?')
+            .next()
+            .map(|s| s.to_string());
+    }
+    if url.contains("youtube.com") {
+        if let Some(v_param) = url.split("v=").nth(1) {
+            return Some(v_param.split('&').next()?.to_string());
+        }
+    }
+    None
+}
+
 /// Bergabung ke voice channel (Lavalink mode)
 #[poise::command(slash_command, prefix_command, guild_only)]
 pub async fn join(ctx: Context<'_>) -> Result<(), Error> {
@@ -45,13 +63,10 @@ pub async fn join(ctx: Context<'_>) -> Result<(), Error> {
         .as_ref()
         .ok_or("Music player not available. Make sure Lavalink server is running.")?;
 
-    // Join voice channel using Songbird
     let songbird = ctx.data().songbird.clone();
 
-    // First, leave any existing connection in this guild
     let _ = songbird.leave(guild_id).await;
 
-    // Join the voice channel and get connection info
     let (connection_info, handle) = match songbird.join_gateway(guild_id, channel_id).await {
         Ok(result) => result,
         Err(e) => {
@@ -67,10 +82,8 @@ pub async fn join(ctx: Context<'_>) -> Result<(), Error> {
         }
     };
 
-    // Keep the handler alive
     let _handler = handle;
 
-    // Convert Songbird ConnectionInfo to Lavalink ConnectionInfo
     use lavalink_rs::model::player::ConnectionInfo as LavalinkConnectionInfo;
     let lavalink_connection_info = LavalinkConnectionInfo {
         endpoint: connection_info.endpoint,
@@ -78,13 +91,11 @@ pub async fn join(ctx: Context<'_>) -> Result<(), Error> {
         session_id: connection_info.session_id,
     };
 
-    // Create Lavalink player with the connection info
     match player
         .create_player_with_connection(guild_id, lavalink_connection_info)
         .await
     {
         Ok(_) => {
-            // Initialize queue for this guild
             player.ensure_queue(guild_id);
 
             send_embed(
@@ -97,7 +108,6 @@ pub async fn join(ctx: Context<'_>) -> Result<(), Error> {
             .await?;
         }
         Err(e) => {
-            // Leave voice channel if player creation fails
             let _ = songbird.leave(guild_id).await;
             send_embed(
                 ctx,
@@ -110,7 +120,6 @@ pub async fn join(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Keluar dari voice channel
 #[poise::command(slash_command, prefix_command, guild_only)]
 pub async fn leave(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or("Must be used in a server")?;
@@ -121,13 +130,11 @@ pub async fn leave(ctx: Context<'_>) -> Result<(), Error> {
         .as_ref()
         .ok_or("Music player not available")?;
 
-    // Clear queue and stop player
     if let Some(player_ctx) = player.get_player_context(guild_id) {
         let _ = player_ctx.close();
     }
     player.clear_queue(guild_id);
 
-    // Disconnect from voice channel using Songbird
     let songbird = ctx.data().songbird.clone();
     let _ = songbird.leave(guild_id).await;
 
@@ -136,7 +143,6 @@ pub async fn leave(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Putar musik dari URL atau pencarian
 #[poise::command(slash_command, prefix_command, guild_only)]
 pub async fn play(
     ctx: Context<'_>,
@@ -153,7 +159,6 @@ pub async fn play(
         .as_ref()
         .ok_or("Music player not available. Make sure Lavalink server is running.")?;
 
-    // Check if user is in voice channel
     let channel_id = match guild
         .voice_states
         .get(&ctx.author().id)
@@ -175,12 +180,10 @@ pub async fn play(
 
     ctx.defer().await?;
 
-    // Auto-join voice channel if not already connected
     let songbird = ctx.data().songbird.clone();
     let needs_join = player.get_player_context(guild_id).is_none();
 
     if needs_join {
-        // Join the voice channel
         let (connection_info, _handle) = match songbird.join_gateway(guild_id, channel_id).await {
             Ok(result) => result,
             Err(e) => {
@@ -216,7 +219,6 @@ pub async fn play(
             return Ok(());
         }
 
-        // Initialize queue
         player.ensure_queue(guild_id);
     }
 
@@ -228,12 +230,12 @@ pub async fn play(
             send_embed(ctx, embed::error("Not Found", "Could not load this URL")).await?;
             return Ok(());
         }
-        
+
         // Check if it's a playlist (more than one track)
         if tracks.len() > 1 {
             return play_playlist(ctx, player, guild_id, tracks).await;
         }
-        
+
         return play_track(ctx, player, guild_id, &tracks[0]).await;
     }
 
@@ -269,13 +271,13 @@ async fn play_playlist(
     tracks: Vec<lavalink_rs::model::track::TrackData>,
 ) -> Result<(), Error> {
     let track_count = tracks.len();
-    
+
     player.set_text_channel(guild_id, ctx.channel_id());
-    
+
     // Get current queue state before adding
     let queue_before = player.get_queue(guild_id);
     let was_empty = queue_before.current.is_none() && queue_before.is_empty();
-    
+
     // Add all tracks to queue
     for track in &tracks {
         let queued_track = QueuedTrack {
@@ -285,13 +287,16 @@ async fn play_playlist(
         };
         player.add_to_queue(guild_id, queued_track);
     }
-    
+
     // If queue was empty, start playing the first track
     if was_empty {
         if let Some(player_ctx) = player.get_player_context(guild_id) {
             if let Some(first_track) = player.next_track(guild_id) {
-                println!("[MUSIC] Playing first track from playlist: {}", first_track.track.info.title);
-                
+                println!(
+                    "[MUSIC] Playing first track from playlist: {}",
+                    first_track.track.info.title
+                );
+
                 match player_ctx.play(&first_track.track).await {
                     Ok(player_info) => {
                         println!(
@@ -299,7 +304,7 @@ async fn play_playlist(
                             player_info.state
                         );
                         player.set_current(guild_id, Some(first_track.clone()));
-                        
+
                         // Send now playing embed for first track
                         let first_info = &first_track.track.info;
                         send_embed(
@@ -324,7 +329,7 @@ async fn play_playlist(
             }
         }
     }
-    
+
     // If something was already playing, just show added message
     let first_track = tracks.first().map(|t| &t.info);
     send_embed(
@@ -338,7 +343,7 @@ async fn play_playlist(
         ),
     )
     .await?;
-    
+
     Ok(())
 }
 
@@ -374,6 +379,17 @@ async fn play_track(
                         player_info.state
                     );
                     if let Some(next_track) = player.next_track(guild_id) {
+                        // Save track title for autoplay
+                        player.set_last_track_title(
+                            guild_id,
+                            Some(next_track.track.info.title.clone()),
+                        );
+                        // Save video ID for YouTube Mix
+                        if let Some(ref uri) = next_track.track.info.uri {
+                            if let Some(vid) = extract_video_id(uri) {
+                                player.set_last_video_id(guild_id, Some(vid));
+                            }
+                        }
                         player.set_current(guild_id, Some(next_track));
                     }
                 }
@@ -604,6 +620,9 @@ pub async fn skip(ctx: Context<'_>) -> Result<(), Error> {
 
     if let Some(player_ctx) = player.get_player_context(guild_id) {
         if let Some(next_track) = player.next_track(guild_id) {
+            // Save track title for autoplay
+            player.set_last_track_title(guild_id, Some(next_track.track.info.title.clone()));
+            player.set_current(guild_id, Some(next_track.clone()));
             let _ = player_ctx.play(&next_track.track).await;
             send_embed(
                 ctx,
@@ -614,12 +633,69 @@ pub async fn skip(ctx: Context<'_>) -> Result<(), Error> {
             )
             .await?;
         } else {
-            player_ctx.stop_now().await?;
-            send_embed(
-                ctx,
-                embed::info("Queue Empty", "No more songs in queue, playback stopped"),
-            )
-            .await?;
+            // Queue is empty - check autoplay
+            let is_autoplay = player.is_autoplay(guild_id);
+
+            if is_autoplay {
+                // Trigger autoplay directly instead of relying on track_end
+                send_embed(
+                    ctx,
+                    embed::music("Skipped", "Queue empty - finding a new song..."),
+                )
+                .await?;
+
+                // Do autoplay search and play
+                if let Some(track) = search_autoplay_track(player, guild_id).await {
+                    // Stop current track first
+                    let _ = player_ctx.stop_now().await;
+
+                    player.set_last_track_title(guild_id, Some(track.info.title.clone()));
+                    let queued = crate::services::music::queue::QueuedTrack {
+                        track: track.clone(),
+                        requester_id: 0,
+                        requester_name: "Autoplay".to_string(),
+                    };
+                    player.set_current(guild_id, Some(queued));
+
+                    if let Err(e) = player_ctx.play(&track).await {
+                        eprintln!("[MUSIC] Skip autoplay failed: {}", e);
+                        send_embed(ctx, embed::error("Autoplay Error", "Failed to play track"))
+                            .await?;
+                    } else {
+                        let channel_id = ctx.channel_id();
+                        let mut embed_msg = CreateEmbed::new()
+                            .title("🔄 Autoplay")
+                            .description(format!(
+                                "**[{}]({})**\nby {}",
+                                track.info.title,
+                                track.info.uri.clone().unwrap_or_default(),
+                                track.info.author
+                            ))
+                            .color(0x1DB954)
+                            .footer(serenity::all::CreateEmbedFooter::new(
+                                "Use /autoplay to disable",
+                            ));
+
+                        // Add thumbnail if available
+                        if let Some(ref artwork) = track.info.artwork_url {
+                            embed_msg = embed_msg.thumbnail(artwork);
+                        }
+
+                        let message = serenity::all::CreateMessage::new().embed(embed_msg);
+                        let _ = channel_id.send_message(&ctx.http(), message).await;
+                    }
+                } else {
+                    player_ctx.stop_now().await?;
+                    send_embed(ctx, embed::info("Autoplay", "No related songs found")).await?;
+                }
+            } else {
+                player_ctx.stop_now().await?;
+                send_embed(
+                    ctx,
+                    embed::info("Queue Empty", "No more songs in queue, playback stopped"),
+                )
+                .await?;
+            }
         }
     } else {
         send_embed(
@@ -630,6 +706,70 @@ pub async fn skip(ctx: Context<'_>) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+/// Search for autoplay track using YouTube API
+async fn search_autoplay_track(
+    player: &crate::services::music::MusicPlayer,
+    guild_id: serenity::all::GuildId,
+) -> Option<lavalink_rs::model::track::TrackData> {
+    use crate::services::youtube::get_global_youtube;
+
+    let last_title = player.get_last_track_title(guild_id)?;
+    let youtube = get_global_youtube()?;
+
+    // Simplify search query - take first 2 words + "mix"
+    let simplified: String = last_title
+        .split_whitespace()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let search_query = format!("{} mix", simplified);
+    println!("[MUSIC] Skip autoplay searching: {}", search_query);
+
+    let videos = youtube.search(&search_query, 10).await.ok()?;
+    if videos.is_empty() {
+        return None;
+    }
+
+    // Filter out similar titles
+    let last_title_lower = last_title.to_lowercase();
+    let simplified_lower = simplified.to_lowercase();
+
+    let filtered: Vec<_> = videos
+        .iter()
+        .filter(|v| {
+            let title_lower = v.title.to_lowercase();
+            !title_lower.contains(&simplified_lower) && !last_title_lower.contains(&title_lower)
+        })
+        .collect();
+
+    let selected = if !filtered.is_empty() {
+        &filtered[0]
+    } else if videos.len() > 1 {
+        &videos[1]
+    } else {
+        return None;
+    };
+
+    println!("[MUSIC] Skip autoplay found: {}", selected.title);
+
+    // Load track via Lavalink
+    let lavalink_guild_id = lavalink_rs::model::GuildId(guild_id.get());
+    let load_result = player
+        .lavalink
+        .load_tracks(lavalink_guild_id, &selected.url)
+        .await
+        .ok()?;
+
+    use lavalink_rs::model::track::TrackLoadData;
+    match load_result.data {
+        Some(TrackLoadData::Track(t)) => Some(t),
+        Some(TrackLoadData::Search(mut t)) if !t.is_empty() => Some(t.remove(0)),
+        Some(TrackLoadData::Playlist(mut p)) if !p.tracks.is_empty() => Some(p.tracks.remove(0)),
+        _ => None,
+    }
 }
 
 #[poise::command(slash_command, prefix_command, guild_only)]
@@ -779,7 +919,9 @@ pub async fn volume(
     player.set_volume(guild_id, level);
 
     if let Some(player_ctx) = player.get_player_context(guild_id) {
-        let lavalink_volume = (level as u16) * 10;
+        // Lavalink volume: 0-1000, where 100 = 100% normal volume
+        // User input is 0-150, so we can use it directly
+        let lavalink_volume = level as u16;
         player_ctx.set_volume(lavalink_volume).await?;
     }
 
@@ -882,6 +1024,42 @@ pub async fn remove(
             send_embed(ctx, embed::error("Not Found", "No song at that position")).await?;
         }
     }
+
+    Ok(())
+}
+
+#[poise::command(slash_command, prefix_command, guild_only)]
+pub async fn autoplay(ctx: Context<'_>) -> Result<(), Error> {
+    let guild_id = ctx.guild_id().ok_or("Must be used in a server")?;
+    let player = ctx
+        .data()
+        .music_player
+        .as_ref()
+        .ok_or("Music player not available")?;
+
+    let current_state = player.is_autoplay(guild_id);
+    let new_state = !current_state;
+    player.set_autoplay(guild_id, new_state);
+
+    let (title, description, color) = if new_state {
+        (
+            "Autoplay Enabled",
+            "When the queue ends, related songs will be automatically added from YouTube.",
+            embed::COLOR_SUCCESS,
+        )
+    } else {
+        (
+            "Autoplay Disabled",
+            "Automatic song recommendations have been turned off.",
+            embed::COLOR_WARNING,
+        )
+    };
+
+    let embed = CreateEmbed::new()
+        .title(title)
+        .description(description)
+        .color(color);
+    send_embed(ctx, embed).await?;
 
     Ok(())
 }

@@ -1,11 +1,10 @@
 pub mod admin;
 pub mod ai;
 pub mod general;
+pub mod moderation;
 pub mod music;
 pub mod ping;
-pub mod qr;
 pub mod redeem;
-pub mod reminder;
 pub mod sys;
 
 use crate::repository::DbPool;
