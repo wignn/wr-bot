@@ -408,7 +408,6 @@ impl ForexService {
             news.description.clone()
         };
 
-        // Determine source from news ID
         let is_dailyforex = news.id.starts_with("dailyforex");
         let is_fxstreet_analysis = news.id.starts_with("fxstreet_analysis");
         let source_name = if is_dailyforex { 
@@ -426,14 +425,14 @@ impl ForexService {
             .unwrap_or_else(|| source_name.to_string());
 
         // Different title for analysis vs news
-        let embed_title = if is_dailyforex || is_fxstreet_analysis {
-            format!("{} TECHNICAL ANALYSIS", news.impact.label())
-        } else {
-            format!("{} FOREX NEWS", news.impact.label())
-        };
+        // let embed_title = if is_dailyforex || is_fxstreet_analysis {
+        //     format!("{} TECHNICAL ANALYSIS", news.impact.label())
+        // } else {
+        //     format!("{} FOREX NEWS", news.impact.label())
+        // };
 
         let embed = CreateEmbed::new()
-            .title(embed_title)
+            .title(&news.title)
             .color(news.impact.color())
             .field(&news.currency, &news.title, false)
             .field("", &desc, false)
@@ -452,7 +451,6 @@ impl ForexService {
     fn extract_currency(text: &str) -> String {
         let upper = text.to_uppercase();
 
-        // Check for currency pairs first
         let pairs = [
             ("EUR/USD", "EUR/USD"),
             ("EURUSD", "EUR/USD"),
@@ -496,7 +494,6 @@ impl ForexService {
             }
         }
 
-        // Check for individual currencies/assets
         let currencies = [
             ("JAPANESE YEN", "JPY"),
             ("YEN", "JPY"),

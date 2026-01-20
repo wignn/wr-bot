@@ -4,6 +4,7 @@ pub mod gemini;
 pub mod genshin_redeem_checker;
 pub mod music;
 pub mod youtube;
+pub mod link;
 
 pub use forex::ForexService;
 pub use gemini::GeminiService;

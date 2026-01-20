@@ -30,3 +30,5 @@ quick-xml = "0.37"
 regex-lite = "0.1"
 gemini-rust = "1.7.1"
 base64 = "0.22.1"
+yt-dlp = { version = "1.4.7", default-features = false, features = ["tracing"] }
+uuid = "1.19.0"

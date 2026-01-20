@@ -14,7 +14,7 @@ RUN cargo build --release || true
 RUN rm -rf src
 
 COPY src ./src
-COPY system-prompt.txt ./
+COPY system-prompt.txt gemini_prompt.txt ./
 
 RUN cargo build --release
 
@@ -30,7 +30,7 @@ RUN useradd -m -u 1000 worm
 WORKDIR /app
 
 COPY --from=builder /app/target/release/worm .
-COPY --from=builder /app/system-prompt.txt ./
+COPY --from=builder /app/system-prompt.txt /app/gemini_prompt.txt ./
 
 RUN chown -R worm:worm /app
 

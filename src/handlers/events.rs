@@ -1,8 +1,9 @@
 use crate::commands::Data;
 use crate::repository::ModerationRepository;
+use crate::services::link::Downloader;
 use crate::services::music::player::get_bot_user_id;
 use crate::utils::embed;
-use serenity::all::{ChannelId, Context, CreateMessage, FullEvent, GuildId, Member, RoleId, User};
+use serenity::all::{ChannelId, Context, CreateAttachment, CreateMessage, FullEvent, GuildId, Member, RoleId, User};
 
 /// Main event handler for Discord events
 pub async fn handle_event(
@@ -11,6 +12,9 @@ pub async fn handle_event(
     data: &Data,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match event {
+        FullEvent::Message { new_message } => {
+            handle_video_link(ctx, new_message).await?;
+        }
         FullEvent::VoiceStateUpdate { old, new } => {
             handle_voice_state_update(ctx, old, new, data).await?;
         }
@@ -37,6 +41,79 @@ pub async fn handle_event(
     Ok(())
 }
 
+async fn handle_video_link(
+    ctx: &Context,
+    message: &serenity::all::Message,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if message.author.bot {
+        return Ok(());
+    }
+
+    let url = extract_video_url(&message.content);
+    if url.is_none() {
+        return Ok(());
+    }
+    let url = url.unwrap();
+
+    let platform = Downloader::detect_platform(&url);
+    if !platform.is_supported() {
+        return Ok(());
+    }
+
+    let _ = message.channel_id.broadcast_typing(&ctx.http).await;
+
+    let downloader = match Downloader::new().await {
+        Ok(dl) => dl,
+        Err(e) => {
+            println!("[VIDEO] Failed to initialize downloader: {}", e);
+            return Ok(());
+        }
+    };
+
+    let video_path = match downloader.download(&url).await {
+        Ok(path) => path,
+        Err(e) => {
+            println!("[VIDEO] Failed to download video: {}", e);
+            return Ok(());
+        }
+    };
+
+    let file_size = std::fs::metadata(&video_path)?.len();
+    let max_size: u64 = 25 * 1024 * 1024;
+
+    if file_size > max_size {
+        let _ = Downloader::delete_video(&video_path);
+        println!("[VIDEO] Video too large: {:.2} MB", file_size as f64 / 1024.0 / 1024.0);
+        return Ok(());
+    }
+
+    let file_data = std::fs::read(&video_path)?;
+    let attachment = CreateAttachment::bytes(file_data, "video.mp4");
+
+    let _ = message.channel_id.send_message(
+        &ctx.http,
+        CreateMessage::new().add_file(attachment)
+    ).await;
+
+    let _ = Downloader::delete_video(&video_path);
+
+    Ok(())
+}
+
+/// Extract video URL from message content
+fn extract_video_url(content: &str) -> Option<String> {
+    // Simple URL extraction - look for http/https links
+    for word in content.split_whitespace() {
+        if word.starts_with("http://") || word.starts_with("https://") {
+            let platform = Downloader::detect_platform(word);
+            if platform.is_supported() {
+                return Some(word.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Handle voice state updates (join/leave voice channels)
 async fn handle_voice_state_update(
     ctx: &Context,
@@ -44,7 +121,6 @@ async fn handle_voice_state_update(
     new: &serenity::all::VoiceState,
     data: &Data,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-
     if let Ok(user) = ctx.http.get_user(new.user_id).await {
         if user.bot {
             return Ok(());
@@ -54,7 +130,6 @@ async fn handle_voice_state_update(
     let old_channel = old.as_ref().and_then(|vs| vs.channel_id);
     let new_channel = new.channel_id;
 
-    
     if old_channel.is_some() && old_channel != new_channel {
         if let Some(guild_id) = new.guild_id {
             if let Some(left_channel_id) = old_channel {
@@ -124,10 +199,7 @@ async fn handle_auto_disconnect(
 
         if let Some(player) = &data.music_player {
             if let Some(channel_id) = player.get_text_channel(guild_id) {
-                let embed_msg = embed::info(
-                    "Disconnect",
-                    "Left voice channel.",
-                );
+                let embed_msg = embed::info("Disconnect", "Left voice channel.");
                 let message = CreateMessage::new().embed(embed_msg);
                 let _ = channel_id.send_message(&ctx.http, message).await;
             }
@@ -212,7 +284,6 @@ async fn handle_member_join(
     drop(db);
 
     if let Ok(Some(config)) = config {
-        // Auto-role
         if let Some(role_id) = config.auto_role_id {
             let role = RoleId::new(role_id);
             let member = new_member.clone();
@@ -221,7 +292,6 @@ async fn handle_member_join(
             }
         }
 
-        // Member join logging
         if let Some(log_channel_id) = config.log_channel_id {
             let channel = ChannelId::new(log_channel_id);
             let member_count = ctx
@@ -229,6 +299,12 @@ async fn handle_member_join(
                 .guild(guild_id)
                 .map(|g| g.member_count)
                 .unwrap_or(0);
+
+            let guild_name = ctx
+                .cache
+                .guild(guild_id)
+                .map(|g| g.name.clone())
+                .unwrap_or_else(|| "Server".to_string());
 
             let account_created = new_member
                 .user
@@ -243,6 +319,7 @@ async fn handle_member_join(
                 &account_created,
                 member_count,
                 avatar.as_deref(),
+                &guild_name,
             );
 
             let message = CreateMessage::new().embed(embed_msg);
@@ -277,6 +354,12 @@ async fn handle_member_leave(
                 .map(|g| g.member_count)
                 .unwrap_or(0);
 
+            let guild_name = ctx
+                .cache
+                .guild(guild_id)
+                .map(|g| g.name.clone())
+                .unwrap_or_else(|| "Server".to_string());
+
             let joined_at = member_data
                 .and_then(|m| m.joined_at)
                 .map(|t| t.format("%Y-%m-%d %H:%M UTC").to_string());
@@ -289,6 +372,7 @@ async fn handle_member_leave(
                 joined_at.as_deref(),
                 member_count,
                 avatar.as_deref(),
+                &guild_name,
             );
 
             let message = CreateMessage::new().embed(embed_msg);
