@@ -7,8 +7,7 @@ services:
     image: wign/bot-discord:latest
     restart: unless-stopped
     volumes:
-      - ./:/usr/src/client
-      - cargo-cache:/usr/local/cargo
+      - bot-data:/app/data # Persist database
     environment:
       - RUST_LOG=info
     env_file:
@@ -21,7 +20,7 @@ services:
     container_name: lavalink
     image: ghcr.io/lavalink-devs/lavalink:4
     restart: unless-stopped
-    user: "0:0" 
+    user: "0:0"
     volumes:
       - ./lavalink/application.yml:/opt/Lavalink/application.yml
       - lavalink-plugins:/opt/Lavalink/plugins
@@ -33,11 +32,11 @@ services:
     ports:
       - "2333:2333"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:2333/version"]
+      test: [ "CMD", "curl", "-f", "http://localhost:2333/version" ]
       interval: 30s
       timeout: 10s
       retries: 3
 
 volumes:
-  cargo-cache:
+  bot-data:
   lavalink-plugins:

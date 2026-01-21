@@ -5,6 +5,7 @@ pub mod general;
 pub mod moderation;
 pub mod music;
 pub mod ping;
+pub mod price;
 pub mod redeem;
 pub mod sys;
 

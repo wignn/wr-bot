@@ -7,13 +7,11 @@ use std::time::Duration;
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
 
-/// Helper to send embed response
 async fn send_embed(ctx: Context<'_>, embed: CreateEmbed) -> Result<(), Error> {
     ctx.send(poise::CreateReply::default().embed(embed)).await?;
     Ok(())
 }
 
-/// Extract YouTube video ID from URL
 fn extract_video_id(url: &str) -> Option<String> {
     if url.contains("youtu.be/") {
         return url
@@ -31,7 +29,6 @@ fn extract_video_id(url: &str) -> Option<String> {
     None
 }
 
-/// Bergabung ke voice channel (Lavalink mode)
 #[poise::command(slash_command, prefix_command, guild_only)]
 pub async fn join(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or("Must be used in a server")?;
@@ -231,7 +228,6 @@ pub async fn play(
             return Ok(());
         }
 
-        // Check if it's a playlist (more than one track)
         if tracks.len() > 1 {
             return play_playlist(ctx, player, guild_id, tracks).await;
         }
@@ -242,7 +238,6 @@ pub async fn play(
     if let Some(youtube) = &ctx.data().youtube_search {
         match youtube.search(&query, 10).await {
             Ok(videos) if !videos.is_empty() => {
-                // Show dropdown with search results
                 return show_search_results(ctx, player, guild_id, videos, &query).await;
             }
             Ok(_) => {
@@ -263,7 +258,6 @@ pub async fn play(
     play_track(ctx, player, guild_id, &tracks[0]).await
 }
 
-/// Play a playlist - adds all tracks to queue
 async fn play_playlist(
     ctx: Context<'_>,
     player: &crate::services::music::MusicPlayer,
@@ -274,11 +268,9 @@ async fn play_playlist(
 
     player.set_text_channel(guild_id, ctx.channel_id());
 
-    // Get current queue state before adding
     let queue_before = player.get_queue(guild_id);
     let was_empty = queue_before.current.is_none() && queue_before.is_empty();
 
-    // Add all tracks to queue
     for track in &tracks {
         let queued_track = QueuedTrack {
             track: track.clone(),
@@ -288,7 +280,6 @@ async fn play_playlist(
         player.add_to_queue(guild_id, queued_track);
     }
 
-    // If queue was empty, start playing the first track
     if was_empty {
         if let Some(player_ctx) = player.get_player_context(guild_id) {
             if let Some(first_track) = player.next_track(guild_id) {
@@ -305,7 +296,6 @@ async fn play_playlist(
                         );
                         player.set_current(guild_id, Some(first_track.clone()));
 
-                        // Send now playing embed for first track
                         let first_info = &first_track.track.info;
                         send_embed(
                             ctx,
@@ -330,7 +320,6 @@ async fn play_playlist(
         }
     }
 
-    // If something was already playing, just show added message
     let first_track = tracks.first().map(|t| &t.info);
     send_embed(
         ctx,
@@ -379,16 +368,13 @@ async fn play_track(
                         player_info.state
                     );
 
-                    // Reset idle timer since we're playing music
                     player.touch_activity(guild_id);
 
                     if let Some(next_track) = player.next_track(guild_id) {
-                        // Save track title for autoplay
                         player.set_last_track_title(
                             guild_id,
                             Some(next_track.track.info.title.clone()),
                         );
-                        // Save video ID for YouTube Mix
                         if let Some(ref uri) = next_track.track.info.uri {
                             if let Some(vid) = extract_video_id(uri) {
                                 player.set_last_video_id(guild_id, Some(vid));
@@ -410,31 +396,29 @@ async fn play_track(
             );
         }
 
-        send_embed(
-            ctx,
-            if is_first_track {
-                embed::now_playing(
-                    &track_info.title,
-                    &track_info.uri.clone().unwrap_or_default(),
-                    &track_info.author,
-                    &format_duration(track_info.length),
-                    &ctx.author().name,
-                    100,   // default volume
-                    false, // not looping
-                    track_info.artwork_url.as_deref(),
-                )
-            } else {
-                embed::added_to_queue(
-                    &track_info.title,
-                    &track_info.uri.unwrap_or_default(),
-                    &format_duration(track_info.length),
-                    queue_position,
-                    &ctx.author().name,
-                    track_info.artwork_url.as_deref(),
-                )
-            },
-        )
-        .await?;
+        let embed_msg = if is_first_track {
+            embed::now_playing(
+                &track_info.title,
+                &track_info.uri.clone().unwrap_or_default(),
+                &track_info.author,
+                &format_duration(track_info.length),
+                &ctx.author().name,
+                player.get_volume(guild_id),
+                player.is_looping(guild_id),
+                track_info.artwork_url.as_deref(),
+            )
+        } else {
+            embed::added_to_queue(
+                &track_info.title,
+                &track_info.uri.unwrap_or_default(),
+                &format_duration(track_info.length),
+                queue_position,
+                &ctx.author().name,
+                track_info.artwork_url.as_deref(),
+            )
+        };
+
+        send_embed(ctx, embed_msg).await?;
     } else {
         send_embed(ctx, embed::error("Error", "Player not connected")).await?;
     }
@@ -545,7 +529,6 @@ async fn show_search_results(
             }
         }
         None => {
-            // Timeout - remove dropdown
             let _ = reply
                 .edit(
                     ctx,
@@ -934,8 +917,6 @@ pub async fn volume(
     player.set_volume(guild_id, level);
 
     if let Some(player_ctx) = player.get_player_context(guild_id) {
-        // Lavalink volume: 0-1000, where 100 = 100% normal volume
-        // User input is 0-150, so we can use it directly
         let lavalink_volume = level as u16;
         player_ctx.set_volume(lavalink_volume).await?;
     }
@@ -959,7 +940,6 @@ pub async fn volume(
     Ok(())
 }
 
-/// Toggle repeat mode (use 'q' for queue repeat)
 #[poise::command(
     slash_command,
     prefix_command,
@@ -982,7 +962,6 @@ pub async fn repeat(
 
     let current_mode = player.get_loop_mode(guild_id);
 
-    // Determine target mode based on argument
     let is_queue_mode = mode
         .as_ref()
         .map(|m| {
@@ -992,14 +971,12 @@ pub async fn repeat(
         .unwrap_or(false);
 
     let new_mode = if is_queue_mode {
-        // Toggle queue repeat
         if current_mode == LoopMode::Queue {
             LoopMode::Off
         } else {
             LoopMode::Queue
         }
     } else {
-        // Toggle track repeat
         if current_mode == LoopMode::Track {
             LoopMode::Off
         } else {

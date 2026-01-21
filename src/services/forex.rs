@@ -12,7 +12,6 @@ const FXSTREET_RSS: &str = "https://www.fxstreet-id.com/rss/news";
 const FXSTREET_ANALYSIS_RSS: &str = "https://www.fxstreet-id.com/rss/analysis";
 const DAILY_FOREX: &str ="https://www.dailyforex.com/rss/technicalanalysis.xml";
 
-// Gemini API structs for translation
 #[derive(Serialize)]
 struct GeminiRequest {
     contents: Vec<GeminiContent>,
@@ -102,7 +101,6 @@ pub struct ForexService {
 
 impl ForexService {
     pub fn new(db: DbPool, http: Arc<Http>) -> Self {
-        // Load Gemini API key for translation
         let gemini_api_key = Config::from_env()
             .ok()
             .and_then(|c| {
@@ -141,7 +139,6 @@ impl ForexService {
     }
 
     async fn check_for_news(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Fetch from all sources
         let mut all_news = Vec::new();
         
         match self.fetch_fxstreet().await {
@@ -297,7 +294,6 @@ impl ForexService {
                 .and_then(|d| DateTime::parse_from_rfc2822(d).ok())
                 .map(|dt| dt.with_timezone(&Utc));
 
-            // Translate title and description to Indonesian
             let (translated_title, translated_desc) = if self.gemini_api_key.is_some() {
                 let t_title = self.translate_to_indonesian(&title).await
                     .unwrap_or_else(|_| Self::clean_html(&title));
@@ -323,7 +319,6 @@ impl ForexService {
         Ok(news)
     }
 
-    /// Translate text to Indonesian using Gemini API
     async fn translate_to_indonesian(&self, text: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let api_key = self.gemini_api_key.as_ref()
             .ok_or("Gemini API key not configured")?;

@@ -32,3 +32,5 @@ gemini-rust = "1.7.1"
 base64 = "0.22.1"
 yt-dlp = { version = "1.4.7", default-features = false, features = ["tracing"] }
 uuid = "1.19.0"
+futures-util = "0.3"
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }

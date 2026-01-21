@@ -7,13 +7,17 @@ use serenity::all::{ActivityData, GatewayIntents, OnlineStatus};
 use songbird::SerenityInit;
 use std::collections::HashSet;
 use std::env;
-use worm::commands::{Data, admin, ai, forex, general, moderation, music, ping, redeem, sys};
+use std::sync::Arc;
+use worm::commands::{
+    Data, admin, ai, forex, general, moderation, music, ping, price, redeem, sys,
+};
 use worm::config::Config;
 use worm::error::BotError;
 use worm::handlers::{handle_event, handle_track_end, on_error};
 use worm::repository::create_pool;
 use worm::services::genshin_redeem_checker::start_code_checker;
 use worm::services::music::MusicPlayer;
+use worm::services::tiingo::TiingoService;
 
 #[tokio::main]
 async fn main() -> Result<(), BotError> {
@@ -38,7 +42,8 @@ async fn main() -> Result<(), BotError> {
     let mut owners = HashSet::new();
     owners.insert(UserId::new(owner_id));
 
-    let db = create_pool("redeem_bot.db")
+    let _ = std::fs::create_dir_all("data");
+    let db = create_pool("data/redeem_bot.db")
         .map_err(|e| BotError::Config(format!("Failed to initialize database: {}", e)))?;
 
     println!("[OK] Database initialized successfully");
@@ -129,6 +134,11 @@ async fn main() -> Result<(), BotError> {
                 forex::forex_enable(),
                 forex::forex_status(),
                 forex::forex_calendar(),
+                // Price commands
+                price::price(),
+                price::alert(),
+                price::alerts(),
+                price::alertremove(),
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
@@ -188,6 +198,20 @@ async fn main() -> Result<(), BotError> {
                     println!("[WARN] YouTube search not available (no YOUTUBE_API_KEY)");
                 }
 
+                // Initialize Tiingo price service
+                if let Ok(tiingo_key) = env::var("TIINGO_API_KEY") {
+                    let tiingo = Arc::new(TiingoService::new(tiingo_key));
+                    worm::services::tiingo::init_global_tiingo(tiingo.clone());
+
+                    let http_for_tiingo = ctx.http.clone();
+                    tokio::spawn(async move {
+                        tiingo.start_websocket(http_for_tiingo).await;
+                    });
+                    println!("[OK] Tiingo price service initialized");
+                } else {
+                    println!("[WARN] Tiingo not available (no TIINGO_API_KEY)");
+                }
+
                 Ok(Data {
                     owners: owners_inner,
                     db: inner_db,
@@ -243,12 +267,8 @@ async fn main() -> Result<(), BotError> {
 
     start_code_checker(db_for_checker.clone(), http.clone()).await;
     println!("[OK] Code checker service started!");
-
-    // Start forex news service
     worm::services::forex::start_forex_service(db_for_checker, http.clone()).await;
     println!("[OK] Forex news service started!");
-
-    // Start idle timeout checker for music
     let http_for_idle = http.clone();
     let songbird_for_idle = songbird.clone();
     tokio::spawn(async move {
@@ -271,25 +291,20 @@ async fn main() -> Result<(), BotError> {
                         guild_id.get()
                     );
 
-                    // Close lavalink player
                     if let Some(player_ctx) = player.get_player_context(guild_id) {
                         let _ = player_ctx.close();
                     }
-
-                    // Leave voice channel
                     let _ = songbird_for_idle.leave(guild_id).await;
 
-                    // Send notification
                     if let Some(channel_id) = text_channel {
                         let embed_msg = embed::info(
-                            "⏰ Auto Disconnect",
+                            "Disconnect",
                             "Disconnected due to inactivity (2 minutes without playing music)",
                         );
                         let message = CreateMessage::new().embed(embed_msg);
                         let _ = channel_id.send_message(&http_for_idle, message).await;
                     }
 
-                    // Remove queue
                     player.remove_queue(guild_id);
                 }
             }
