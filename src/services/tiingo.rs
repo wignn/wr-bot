@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serenity::all::{ChannelId, CreateEmbed, CreateMessage, Http};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -84,13 +84,6 @@ struct SubscribeEventData {
     threshold_level: u32,
 }
 
-#[derive(Deserialize, Debug)]
-struct TiingoMessage {
-    #[serde(rename = "messageType")]
-    message_type: String,
-    data: Option<Vec<serde_json::Value>>,
-}
-
 impl TiingoService {
     pub fn new(api_key: String) -> Self {
         Self {
@@ -131,10 +124,6 @@ impl TiingoService {
             .collect()
     }
 
-    pub fn get_all_alerts(&self) -> Vec<PriceAlert> {
-        self.alerts.read().clone()
-    }
-
     fn update_price(&self, symbol: String, bid: f64, ask: f64) {
         let mid = (bid + ask) / 2.0;
         let price = ForexPrice {
@@ -167,11 +156,11 @@ impl TiingoService {
         alerts.retain(|a| !triggered.iter().any(|t| t.id == a.id));
     }
 
-    pub async fn start_websocket(self: Arc<Self>, http: Arc<Http>) {
+    pub async fn start_price_polling(self: Arc<Self>, http: Arc<Http>) {
         loop {
             println!("[TIINGO] Connecting to WebSocket...");
             match self.connect_and_run(http.clone()).await {
-                Ok(_) => println!("[TIINGO] WebSocket connection closed normally"),
+                Ok(_) => println!("[TIINGO] WebSocket closed normally"),
                 Err(e) => eprintln!("[TIINGO] WebSocket error: {}", e),
             }
             println!("[TIINGO] Reconnecting in 5 seconds...");
@@ -188,7 +177,6 @@ impl TiingoService {
 
         let (mut write, mut read) = ws_stream.split();
 
-        // Send subscribe message
         let subscribe_msg = SubscribeMessage {
             event_name: "subscribe".to_string(),
             authorization: self.api_key.clone(),
@@ -199,12 +187,12 @@ impl TiingoService {
         write.send(WsMessage::Text(msg_json)).await?;
         println!("[TIINGO] Sent subscription message");
 
+        let mut log_count = 0u64;
+
         while let Some(msg) = read.next().await {
             match msg {
                 Ok(WsMessage::Text(text)) => {
-                    if let Err(e) = self.handle_message(&text, &http).await {
-                        eprintln!("[TIINGO] Error handling message: {}", e);
-                    }
+                    self.handle_message(&text, &http, &mut log_count).await;
                 }
                 Ok(WsMessage::Ping(data)) => {
                     let _ = write.send(WsMessage::Pong(data)).await;
@@ -224,49 +212,71 @@ impl TiingoService {
         Ok(())
     }
 
-    async fn handle_message(
-        &self,
-        text: &str,
-        http: &Arc<Http>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let msg: TiingoMessage = serde_json::from_str(text)?;
+    async fn handle_message(&self, text: &str, http: &Arc<Http>, log_count: &mut u64) {
+        let json: serde_json::Value = match serde_json::from_str(text) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
 
-        match msg.message_type.as_str() {
-            "Q" => {
-                // Quote update
-                if let Some(data) = msg.data {
-                    if data.len() >= 8 {
-                        let symbol = data[1].as_str().unwrap_or("").to_lowercase();
-                        let bid = data[6].as_f64().unwrap_or(0.0);
-                        let ask = data[7].as_f64().unwrap_or(0.0);
+        let message_type = json
+            .get("messageType")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
-                        if !symbol.is_empty() && bid > 0.0 && ask > 0.0 {
-                            self.update_price(symbol.clone(), bid, ask);
+        match message_type {
+            "A" => {
+                if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
+                    let update_type = data.get(0).and_then(|v| v.as_str()).unwrap_or("");
 
-                            let mid = (bid + ask) / 2.0;
-                            let triggered = self.check_alerts(&symbol, mid);
+                    // Log first 3 raw messages for debugging
+                    if *log_count < 3 {
+                        println!("[TIINGO] Raw: {:?}", data);
+                    }
 
-                            if !triggered.is_empty() {
-                                self.send_alert_notifications(&triggered, mid, http).await;
-                                self.remove_triggered_alerts(&triggered);
-                            }
+                    if update_type == "Q" && data.len() >= 8 {
+                        let symbol = data
+                            .get(1)
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_lowercase();
+                        // Index 4 = Bid Price, Index 7 = Ask Price (NOT 6, that's Ask Size!)
+                        let bid = data.get(4).and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let ask = data.get(7).and_then(|v| v.as_f64()).unwrap_or(0.0);
+
+                        if symbol.is_empty() || bid <= 0.0 || ask <= 0.0 {
+                            return;
+                        }
+
+                        // Validate spread < 1%
+                        let spread_pct = (ask - bid).abs() / bid * 100.0;
+                        if spread_pct > 1.0 {
+                            return;
+                        }
+
+                        *log_count += 1;
+                        if *log_count <= 15 {
+                            println!("[TIINGO] {} bid={:.5} ask={:.5}", symbol, bid, ask);
+                        }
+
+                        self.update_price(symbol.clone(), bid, ask);
+
+                        let mid = (bid + ask) / 2.0;
+                        let triggered = self.check_alerts(&symbol, mid);
+                        if !triggered.is_empty() {
+                            self.send_alert_notifications(&triggered, mid, http).await;
+                            self.remove_triggered_alerts(&triggered);
                         }
                     }
                 }
             }
             "I" => {
-                println!("[TIINGO] Connection info received");
-            }
-            "H" => {
-                // Heartbeat
+                println!("[TIINGO] Info: {}", text);
             }
             "E" => {
-                eprintln!("[TIINGO] Error message: {}", text);
+                eprintln!("[TIINGO] Error: {}", text);
             }
             _ => {}
         }
-
-        Ok(())
     }
 
     async fn send_alert_notifications(
@@ -276,45 +286,28 @@ impl TiingoService {
         http: &Arc<Http>,
     ) {
         for alert in alerts {
-            let condition_text = match alert.condition {
-                AlertCondition::Above => "above",
-                AlertCondition::Below => "below",
-            };
-
             let embed = CreateEmbed::new()
-                .title("🔔 Price Alert Triggered!")
+                .title("Price Alert Triggered!")
                 .description(format!(
-                    "**{}** is now {} **{:.5}**\n\nTarget: {} {:.5}\nCurrent: {:.5}",
+                    "**{}** is now {} **{:.5}**\n\nTarget: {:.5}\nCurrent: {:.5}",
                     alert.symbol.to_uppercase(),
-                    condition_text,
+                    alert.condition,
                     alert.target_price,
-                    condition_text,
                     alert.target_price,
                     current_price
                 ))
-                .color(0x00ff00)
-                .footer(serenity::all::CreateEmbedFooter::new(format!(
-                    "Alert for <@{}>",
-                    alert.user_id
-                )));
+                .color(0x00ff00);
 
             let channel_id = ChannelId::new(alert.channel_id);
-            let user_mention = format!("<@{}>", alert.user_id);
-            let message = CreateMessage::new().content(user_mention).embed(embed);
+            let message = CreateMessage::new()
+                .content(format!("<@{}>", alert.user_id))
+                .embed(embed);
 
-            if let Err(e) = channel_id.send_message(http, message).await {
-                eprintln!("[TIINGO] Failed to send alert notification: {}", e);
-            } else {
-                println!(
-                    "[TIINGO] Sent alert for {} to user {}",
-                    alert.symbol, alert.user_id
-                );
-            }
+            let _ = channel_id.send_message(http, message).await;
         }
     }
 }
 
-// Global instance
 use once_cell::sync::OnceCell;
 static GLOBAL_TIINGO: OnceCell<Arc<TiingoService>> = OnceCell::new();
 
