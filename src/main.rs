@@ -7,7 +7,7 @@ use serenity::all::{ActivityData, GatewayIntents, OnlineStatus};
 use songbird::SerenityInit;
 use std::collections::HashSet;
 use std::env;
-use worm::commands::{admin, ai, forex, general, moderation, music, ping, redeem, sys, Data};
+use worm::commands::{Data, admin, ai, forex, general, moderation, music, ping, redeem, sys};
 use worm::config::Config;
 use worm::error::BotError;
 use worm::handlers::{handle_event, handle_track_end, on_error};
@@ -104,7 +104,7 @@ async fn main() -> Result<(), BotError> {
                 music::queue(),
                 music::nowplaying(),
                 music::volume(),
-                music::loop_track(),
+                music::repeat(),
                 music::shuffle(),
                 music::remove(),
                 music::autoplay(),
@@ -226,7 +226,7 @@ async fn main() -> Result<(), BotError> {
             let activities = vec![
                 ActivityData::custom(format!("With {} users!", total_users)),
                 ActivityData::custom(format!("In {} server!", total_server)),
-                ];
+            ];
 
             let runners = shard_manager.runners.lock().await;
             for (_, runner) in runners.iter() {
@@ -245,8 +245,57 @@ async fn main() -> Result<(), BotError> {
     println!("[OK] Code checker service started!");
 
     // Start forex news service
-    worm::services::forex::start_forex_service(db_for_checker, http).await;
+    worm::services::forex::start_forex_service(db_for_checker, http.clone()).await;
     println!("[OK] Forex news service started!");
+
+    // Start idle timeout checker for music
+    let http_for_idle = http.clone();
+    let songbird_for_idle = songbird.clone();
+    tokio::spawn(async move {
+        use serenity::all::CreateMessage;
+        use std::time::Duration;
+        use worm::utils::embed;
+
+        let idle_timeout = Duration::from_secs(120); // 2 minutes
+        let mut interval = tokio::time::interval(Duration::from_secs(30)); // Check every 30s
+
+        loop {
+            interval.tick().await;
+
+            if let Some(player) = worm::services::music::player::get_global_player() {
+                let idle_guilds = player.get_idle_guilds(idle_timeout);
+
+                for (guild_id, text_channel) in idle_guilds {
+                    println!(
+                        "[MUSIC] Guild {} idle for 2+ minutes, disconnecting...",
+                        guild_id.get()
+                    );
+
+                    // Close lavalink player
+                    if let Some(player_ctx) = player.get_player_context(guild_id) {
+                        let _ = player_ctx.close();
+                    }
+
+                    // Leave voice channel
+                    let _ = songbird_for_idle.leave(guild_id).await;
+
+                    // Send notification
+                    if let Some(channel_id) = text_channel {
+                        let embed_msg = embed::info(
+                            "⏰ Auto Disconnect",
+                            "Disconnected due to inactivity (2 minutes without playing music)",
+                        );
+                        let message = CreateMessage::new().embed(embed_msg);
+                        let _ = channel_id.send_message(&http_for_idle, message).await;
+                    }
+
+                    // Remove queue
+                    player.remove_queue(guild_id);
+                }
+            }
+        }
+    });
+    println!("[OK] Music idle timeout checker started!");
 
     client
         .start()

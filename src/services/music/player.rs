@@ -1,4 +1,4 @@
-use crate::services::music::queue::{MusicQueue, QueuedTrack};
+use crate::services::music::queue::{LoopMode, MusicQueue, QueuedTrack};
 use lavalink_rs::client::LavalinkClient;
 use lavalink_rs::model::track::TrackData;
 use once_cell::sync::OnceCell;
@@ -157,8 +157,50 @@ impl MusicPlayer {
         self.queues
             .read()
             .get(&guild_id)
-            .map(|q| q.is_looping)
+            .map(|q| q.is_looping || q.loop_mode == LoopMode::Track)
             .unwrap_or(false)
+    }
+
+    pub fn set_loop_mode(&self, guild_id: GuildId, mode: LoopMode) {
+        let mut queues = self.queues.write();
+        if let Some(queue) = queues.get_mut(&guild_id) {
+            queue.loop_mode = mode.clone();
+            // Also update is_looping for backwards compatibility
+            queue.is_looping = mode == LoopMode::Track;
+        }
+    }
+
+    pub fn get_loop_mode(&self, guild_id: GuildId) -> LoopMode {
+        self.queues
+            .read()
+            .get(&guild_id)
+            .map(|q| q.loop_mode.clone())
+            .unwrap_or_default()
+    }
+
+    /// Cycles through loop modes: Off -> Track -> Queue -> Off
+    pub fn cycle_loop_mode(&self, guild_id: GuildId) -> LoopMode {
+        let mut queues = self.queues.write();
+        if let Some(queue) = queues.get_mut(&guild_id) {
+            queue.loop_mode = match queue.loop_mode {
+                LoopMode::Off => LoopMode::Track,
+                LoopMode::Track => LoopMode::Queue,
+                LoopMode::Queue => LoopMode::Off,
+            };
+            queue.is_looping = queue.loop_mode == LoopMode::Track;
+            return queue.loop_mode.clone();
+        }
+        LoopMode::Off
+    }
+
+    /// Get next track with information about whether it's the same track (for loop)
+    pub fn next_track_with_loop_info(&self, guild_id: GuildId) -> (Option<QueuedTrack>, bool) {
+        let mut queues = self.queues.write();
+        if let Some(queue) = queues.get_mut(&guild_id) {
+            queue.next_with_loop_info()
+        } else {
+            (None, false)
+        }
     }
 
     pub fn shuffle_queue(&self, guild_id: GuildId) {
@@ -234,6 +276,32 @@ impl MusicPlayer {
         if let Some(queue) = queues.get_mut(&guild_id) {
             queue.played_video_ids.clear();
         }
+    }
+
+    /// Update activity timestamp for a guild (call when music starts playing)
+    pub fn touch_activity(&self, guild_id: GuildId) {
+        let mut queues = self.queues.write();
+        if let Some(queue) = queues.get_mut(&guild_id) {
+            queue.touch_activity();
+        }
+    }
+
+    /// Get all guilds that have been idle (no current track) for the given duration
+    pub fn get_idle_guilds(
+        &self,
+        idle_duration: std::time::Duration,
+    ) -> Vec<(GuildId, Option<serenity::all::ChannelId>)> {
+        self.queues
+            .read()
+            .iter()
+            .filter(|(_, queue)| queue.is_idle_for(idle_duration))
+            .map(|(guild_id, queue)| (*guild_id, queue.text_channel_id))
+            .collect()
+    }
+
+    /// Remove a guild's queue (after disconnect)
+    pub fn remove_queue(&self, guild_id: GuildId) {
+        self.queues.write().remove(&guild_id);
     }
 
     pub fn get_player_context(

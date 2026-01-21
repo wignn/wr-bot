@@ -378,6 +378,10 @@ async fn play_track(
                         "[MUSIC] Play request successful, player state: {:?}",
                         player_info.state
                     );
+
+                    // Reset idle timer since we're playing music
+                    player.touch_activity(guild_id);
+
                     if let Some(next_track) = player.next_track(guild_id) {
                         // Save track title for autoplay
                         player.set_last_track_title(
@@ -851,7 +855,18 @@ pub async fn queue(ctx: Context<'_>) -> Result<(), Error> {
             ),
             true,
         )
-        .field("Loop", if queue.is_looping { "On" } else { "Off" }, true)
+        .field(
+            "Loop",
+            {
+                use crate::services::music::queue::LoopMode;
+                match queue.loop_mode {
+                    LoopMode::Off => "Off",
+                    LoopMode::Track => "🔂 Track",
+                    LoopMode::Queue => "🔁 Queue",
+                }
+            },
+            true,
+        )
         .field("Volume", format!("{}%", queue.volume), true)
         .color(embed::COLOR_MUSIC);
 
@@ -944,8 +959,20 @@ pub async fn volume(
     Ok(())
 }
 
-#[poise::command(slash_command, prefix_command, guild_only, rename = "loop")]
-pub async fn loop_track(ctx: Context<'_>) -> Result<(), Error> {
+/// Toggle repeat mode (use 'q' for queue repeat)
+#[poise::command(
+    slash_command,
+    prefix_command,
+    guild_only,
+    rename = "repeat",
+    aliases("r")
+)]
+pub async fn repeat(
+    ctx: Context<'_>,
+    #[description = "'q' for queue repeat, empty for track"] mode: Option<String>,
+) -> Result<(), Error> {
+    use crate::services::music::queue::LoopMode;
+
     let guild_id = ctx.guild_id().ok_or("Must be used in a server")?;
     let player = ctx
         .data()
@@ -953,18 +980,42 @@ pub async fn loop_track(ctx: Context<'_>) -> Result<(), Error> {
         .as_ref()
         .ok_or("Music player not available")?;
 
-    let is_looping = player.is_looping(guild_id);
-    player.set_loop(guild_id, !is_looping);
+    let current_mode = player.get_loop_mode(guild_id);
 
-    if !is_looping {
-        send_embed(ctx, embed::music("Loop Enabled", "Current track will loop")).await?;
+    // Determine target mode based on argument
+    let is_queue_mode = mode
+        .as_ref()
+        .map(|m| {
+            let m = m.to_lowercase();
+            m == "q" || m == "queue"
+        })
+        .unwrap_or(false);
+
+    let new_mode = if is_queue_mode {
+        // Toggle queue repeat
+        if current_mode == LoopMode::Queue {
+            LoopMode::Off
+        } else {
+            LoopMode::Queue
+        }
     } else {
-        send_embed(
-            ctx,
-            embed::music("Loop Disabled", "Playback will continue normally"),
-        )
-        .await?;
-    }
+        // Toggle track repeat
+        if current_mode == LoopMode::Track {
+            LoopMode::Off
+        } else {
+            LoopMode::Track
+        }
+    };
+
+    player.set_loop_mode(guild_id, new_mode.clone());
+
+    let (title, description) = match new_mode {
+        LoopMode::Off => ("🔁 Repeat Disabled", "Playback will continue normally"),
+        LoopMode::Track => ("🔂 Repeat Track", "Current track will repeat"),
+        LoopMode::Queue => ("🔁 Repeat Queue", "Entire queue will repeat when finished"),
+    };
+
+    send_embed(ctx, embed::music(title, description)).await?;
 
     Ok(())
 }

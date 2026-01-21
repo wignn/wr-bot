@@ -43,8 +43,7 @@ pub async fn handle_track_end(_client: LavalinkClient, event: &TrackEnd) {
     };
 
     match player_ctx.get_player().await {
-        Ok(p) if p.state.connected => {
-        }
+        Ok(p) if p.state.connected => {}
         _ => {
             println!("[MUSIC] Player disconnected, skipping track_end processing");
             player.set_current(guild_id, None);
@@ -55,8 +54,8 @@ pub async fn handle_track_end(_client: LavalinkClient, event: &TrackEnd) {
     let text_channel = player.get_text_channel(guild_id);
     let queue = player.get_queue(guild_id);
     let volume = queue.volume;
-    let is_looping = queue.is_looping;
-    let next_track = player.next_track(guild_id);
+    let is_looping = player.is_looping(guild_id);
+    let (next_track, is_same_track) = player.next_track_with_loop_info(guild_id);
 
     match next_track {
         Some(track) => {
@@ -66,13 +65,20 @@ pub async fn handle_track_end(_client: LavalinkClient, event: &TrackEnd) {
 
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-            match player_ctx.play(&track.track).await {
-                Ok(info) => {
-                    println!(
-                        "[MUSIC] Successfully started next track, state: {:?}",
-                        info.state
-                    );
+            if let Err(e) = player_ctx.play(&track.track).await {
+                eprintln!("[MUSIC] Failed to play next track: {}", e);
+                player.set_current(guild_id, None);
+            } else {
+                // Reset idle timer since we're playing music
+                player.touch_activity(guild_id);
 
+                println!(
+                    "[MUSIC] Successfully started next track, is_same_track: {}",
+                    is_same_track
+                );
+
+                // Only send Now Playing embed if this is a NEW track (not looping same track)
+                if !is_same_track {
                     if let Some(channel_id) = text_channel {
                         if let Some(http) = get_global_http() {
                             let track_info = &track.track.info;
@@ -100,10 +106,8 @@ pub async fn handle_track_end(_client: LavalinkClient, event: &TrackEnd) {
                             }
                         }
                     }
-                }
-                Err(e) => {
-                    eprintln!("[MUSIC] Failed to play next track: {}", e);
-                    player.set_current(guild_id, None);
+                } else {
+                    println!("[MUSIC] Skipping Now Playing embed (track is looping)");
                 }
             }
         }
@@ -245,7 +249,11 @@ async fn handle_autoplay(
 
     // Pick first unplayed track instead of random to ensure variety
     let track = &tracks[0];
-    println!("[MUSIC] Autoplay found: {} (from {} candidates)", track.info.title, tracks.len());
+    println!(
+        "[MUSIC] Autoplay found: {} (from {} candidates)",
+        track.info.title,
+        tracks.len()
+    );
 
     // Extract and save video ID for next autoplay iteration
     if let Some(ref uri) = track.info.uri {
@@ -270,26 +278,31 @@ async fn handle_autoplay(
     if let Err(e) = player_ctx.play(&track).await {
         eprintln!("[MUSIC] Autoplay failed to play: {}", e);
         player.set_current(guild_id, None);
-    } else if let Some(channel_id) = text_channel {
-        if let Some(http) = get_global_http() {
-            let mut embed = CreateEmbed::new()
-                .title("Autoplay")
-                .description(format!(
-                    "**[{}]({})**\nby {}",
-                    track.info.title,
-                    track.info.uri.clone().unwrap_or_default(),
-                    track.info.author
-                ))
-                .color(0x1DB954)
-                .footer(CreateEmbedFooter::new("Use /autoplay to disable"));
+    } else {
+        // Reset idle timer since we're playing music
+        player.touch_activity(guild_id);
 
-            // Add thumbnail if available
-            if let Some(ref artwork) = track.info.artwork_url {
-                embed = embed.thumbnail(artwork);
+        if let Some(channel_id) = text_channel {
+            if let Some(http) = get_global_http() {
+                let mut embed = CreateEmbed::new()
+                    .title("Autoplay")
+                    .description(format!(
+                        "**[{}]({})**\nby {}",
+                        track.info.title,
+                        track.info.uri.clone().unwrap_or_default(),
+                        track.info.author
+                    ))
+                    .color(0x1DB954)
+                    .footer(CreateEmbedFooter::new("Use /autoplay to disable"));
+
+                // Add thumbnail if available
+                if let Some(ref artwork) = track.info.artwork_url {
+                    embed = embed.thumbnail(artwork);
+                }
+
+                let message = CreateMessage::new().embed(embed);
+                let _ = channel_id.send_message(http.as_ref(), message).await;
             }
-
-            let message = CreateMessage::new().embed(embed);
-            let _ = channel_id.send_message(http.as_ref(), message).await;
         }
     }
 }
