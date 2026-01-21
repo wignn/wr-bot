@@ -228,18 +228,12 @@ impl TiingoService {
                 if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
                     let update_type = data.get(0).and_then(|v| v.as_str()).unwrap_or("");
 
-                    // Log first 3 raw messages for debugging
-                    if *log_count < 3 {
-                        println!("[TIINGO] Raw: {:?}", data);
-                    }
-
                     if update_type == "Q" && data.len() >= 8 {
                         let symbol = data
                             .get(1)
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_lowercase();
-                        // Index 4 = Bid Price, Index 7 = Ask Price (NOT 6, that's Ask Size!)
                         let bid = data.get(4).and_then(|v| v.as_f64()).unwrap_or(0.0);
                         let ask = data.get(7).and_then(|v| v.as_f64()).unwrap_or(0.0);
 
@@ -247,7 +241,6 @@ impl TiingoService {
                             return;
                         }
 
-                        // Validate spread < 1%
                         let spread_pct = (ask - bid).abs() / bid * 100.0;
                         if spread_pct > 1.0 {
                             return;

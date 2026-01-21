@@ -198,18 +198,18 @@ async fn main() -> Result<(), BotError> {
                     println!("[WARN] YouTube search not available (no YOUTUBE_API_KEY)");
                 }
 
-                // if let Ok(tiingo_key) = env::var("TIINGO_API_KEY") {
-                //     let tiingo = Arc::new(TiingoService::new(tiingo_key));
-                //     worm::services::tiingo::init_global_tiingo(tiingo.clone());
-                //
-                //     let http_for_tiingo = ctx.http.clone();
-                //     tokio::spawn(async move {
-                //         tiingo.start_price_polling(http_for_tiingo).await;
-                //     });
-                //     println!("[OK] Tiingo price service initialized");
-                // } else {
-                //     println!("[WARN] Tiingo not available (no TIINGO_API_KEY)");
-                // }
+                if let Ok(tiingo_key) = env::var("TIINGO_API_KEY") {
+                    let tiingo = Arc::new(TiingoService::new(tiingo_key));
+                    worm::services::tiingo::init_global_tiingo(tiingo.clone());
+                
+                    let http_for_tiingo = ctx.http.clone();
+                    tokio::spawn(async move {
+                        tiingo.start_price_polling(http_for_tiingo).await;
+                    });
+                    println!("[OK] Tiingo price service initialized");
+                } else {
+                    println!("[WARN] Tiingo not available (no TIINGO_API_KEY)");
+                }
 
                 Ok(Data {
                     owners: owners_inner,
