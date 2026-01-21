@@ -1,4 +1,4 @@
-FROM rust:slim AS builder
+FROM rustlang/rust:nightly-bookworm AS builder
 
 RUN apt-get update && apt-get install -y \
     pkg-config \
@@ -8,7 +8,6 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
-
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 RUN cargo build --release || true
 RUN rm -rf src
@@ -30,11 +29,10 @@ RUN useradd -m -u 1000 worm
 WORKDIR /app
 
 COPY --from=builder /app/target/release/worm .
-COPY --from=builder /app/system-prompt.txt /app/gemini_prompt.txt ./
+COPY --from=builder /app/system-prompt.txt .
+COPY --from=builder /app/gemini_prompt.txt .
 
 RUN chown -R worm:worm /app
-
 USER worm
 
 CMD ["./worm"]
-

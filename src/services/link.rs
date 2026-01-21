@@ -1,10 +1,14 @@
 use std::path::PathBuf;
+use std::sync::OnceLock;
+use tokio::sync::Mutex;
 use uuid::Uuid;
+use yt_dlp::model::selector::{AudioQuality, VideoQuality};
 use yt_dlp::Youtube;
+
+static GLOBAL_DOWNLOADER: OnceLock<Mutex<Option<Youtube>>> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Platform {
-    YouTube,
     YouTubeShorts,
     Instagram,
     Facebook,
@@ -13,27 +17,28 @@ pub enum Platform {
 }
 
 impl Platform {
-    pub fn from_url(url: &str) -> Self {
-        let url_lower = url.to_lowercase();
-        
-        if url_lower.contains("youtube.com/shorts") || url_lower.contains("youtu.be") && url_lower.contains("/shorts") {
-            Platform::YouTubeShorts
-        } else if url_lower.contains("youtube.com") || url_lower.contains("youtu.be") {
-            Platform::YouTube
-        } else if url_lower.contains("instagram.com") || url_lower.contains("instagr.am") {
-            Platform::Instagram
-        } else if url_lower.contains("facebook.com") || url_lower.contains("fb.watch") || url_lower.contains("fb.com") {
-            Platform::Facebook
-        } else if url_lower.contains("tiktok.com") || url_lower.contains("vm.tiktok") {
-            Platform::TikTok
-        } else {
-            Platform::Unknown
+    pub fn from_url(url: &str) -> Platform {
+        let url = url.to_lowercase();
+
+        if url.contains("youtube.com/shorts") || (url.contains("youtu.be") && url.contains("/shorts")){
+            return Platform::YouTubeShorts;
         }
+
+        if url.contains("instagram.com/reel") || url.contains("instagram.com/reels") {
+            return Platform::Instagram;
+        }
+
+        if url.contains("facebook.com/reel") || url.contains("fb.watch") {
+            return Platform::Facebook;
+        }
+        if url.contains("tiktok.com") || url.contains("vm.tiktok") { 
+            return Platform::TikTok 
+        }
+        Platform::Unknown
     }
 
     pub fn name(&self) -> &str {
         match self {
-            Platform::YouTube => "YouTube",
             Platform::YouTubeShorts => "YouTube Shorts",
             Platform::Instagram => "Instagram",
             Platform::Facebook => "Facebook",
@@ -47,43 +52,59 @@ impl Platform {
     }
 }
 
-pub struct Downloader {
-    yt: Youtube,
-}
+pub struct Downloader;
 
 impl Downloader {
-    pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let executables_dir = PathBuf::from("bin");
-        let output_dir = PathBuf::from("output");
+    async fn get_or_init_yt() -> Result<Youtube, Box<dyn std::error::Error + Send + Sync>> {
+        let lock = GLOBAL_DOWNLOADER.get_or_init(|| Mutex::new(None));
+        let mut guard = lock.lock().await;
 
-        if !output_dir.exists() {
-            std::fs::create_dir_all(&output_dir)?;
+        if guard.is_none() {
+            let executables_dir = PathBuf::from("bin");
+            let output_dir = PathBuf::from("output");
+
+            if !output_dir.exists() {
+                tokio::fs::create_dir_all(&output_dir).await?;
+            }
+
+            println!("[VIDEO] Initializing yt-dlp binaries...");
+            let yt = Youtube::with_new_binaries(executables_dir, output_dir).await?;
+            *guard = Some(yt);
+            println!("[VIDEO] yt-dlp initialized successfully");
         }
 
-        let yt = Youtube::with_new_binaries(executables_dir, output_dir).await?;
-        Ok(Self { yt })
+        Ok(guard.as_ref().unwrap().clone())
     }
 
     pub fn detect_platform(url: &str) -> Platform {
         Platform::from_url(url)
     }
 
-    pub async fn download(&self, url: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    pub async fn download(url: &str) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
         let platform = Platform::from_url(url);
-        
+
         if !platform.is_supported() {
             return Err("Platform tidak didukung. Gunakan link dari YouTube, Instagram, Facebook, atau TikTok.".into());
         }
 
+        let yt = Self::get_or_init_yt().await?;
+
         let id = Uuid::new_v4();
         let filename = format!("{}.mp4", id);
-        let path = self.yt.download(url.to_string(), &filename).execute().await?;
+
+       let path = yt
+            .download(url.to_string(), &filename)
+            .video_quality(VideoQuality::Medium) // 720p
+            .audio_quality(AudioQuality::Medium) // 128kbps
+            .execute()
+            .await?;
+
         Ok(path)
     }
 
-    pub fn delete_video(path: &PathBuf) -> Result<(), std::io::Error> {
+    pub async fn delete_video(path: &PathBuf) -> Result<(), std::io::Error> {
         if path.exists() {
-            std::fs::remove_file(path)?;
+            tokio::fs::remove_file(path).await?;
         }
         Ok(())
     }

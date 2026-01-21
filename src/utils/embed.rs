@@ -129,68 +129,57 @@ pub const COLOR_LEAVE: u32 = 0xF04747; // Red for leaves
 pub fn member_join(
     username: &str,
     user_id: u64,
-    _account_created: &str,
     member_count: u64,
     avatar_url: Option<&str>,
     guild_name: &str,
 ) -> CreateEmbed {
-    let border = "┌──────────────────┐";
-    let border_bottom = "└──────────────────┘";
-
     let description = format!(
-        "🌸✨*·Welcome·*✨🌸\n{}\n💕 Hai <@{}>, selamat datang di **{}**! kamu adalah member ke **{}**\n🌿 Semoga kamu nyaman, betah & bahagia di sini 🌈\n{}\n\n§ Silakan perkenalkan diri dan baca rules dulu ya 🌷 ꓷ",
-        border, user_id, guild_name, member_count, border_bottom
+        "👋 **Welcome!**\n\nHai <@{}>, selamat datang di **{}**.\nKamu adalah member ke **{}**.",
+        user_id, guild_name, member_count
     );
 
     let mut embed = CreateEmbed::new()
         .description(description)
-        .color(0x8B5CF6) // Purple/violet color
+        .color(0x5865F2)
         .footer(serenity::all::CreateEmbedFooter::new(format!(
             "WELCOME • {}",
-            username.to_uppercase()
+            username
         )));
 
     if let Some(avatar) = avatar_url {
-        embed = embed.image(avatar);
+        embed = embed.thumbnail(avatar);
     }
 
     embed
 }
+
 
 pub fn member_leave(
     username: &str,
-    user_id: u64,
-    joined_at: Option<&str>,
     member_count: u64,
     avatar_url: Option<&str>,
     guild_name: &str,
 ) -> CreateEmbed {
-    let border = "┌──────────────────┐";
-    let border_bottom = "└──────────────────┘";
-
-    let joined_info = joined_at
-        .map(|j| format!(" • Bergabung: {}", j))
-        .unwrap_or_default();
-
     let description = format!(
-        "🌙✨*·Goodbye·*✨🌙\n{}\n💔 Sayangnya **{}** telah meninggalkan **{}**{}\n🍂 Semoga kita bisa bertemu lagi suatu saat nanti\n{}\n\n👋 Selamat tinggal! Member tersisa: **{}**",
-        border, username, guild_name, joined_info, border_bottom, member_count
+        "👋 **Goodbye**\n\n**{}** telah meninggalkan **{}**.\nMember tersisa: **{}**",
+        username, guild_name, member_count
     );
 
     let mut embed = CreateEmbed::new()
         .description(description)
-        .color(0xEF4444) // Red color
+        .color(0xED4245)
         .footer(serenity::all::CreateEmbedFooter::new(format!(
             "GOODBYE • {}",
-            user_id
+            username
         )));
 
     if let Some(avatar) = avatar_url {
-        embed = embed.image(avatar);
+        embed = embed.thumbnail(avatar);
     }
 
     embed
 }
+
 
 pub fn voice_join(
     username: &str,
@@ -217,7 +206,7 @@ pub fn voice_leave(
     avatar_url: Option<&str>,
 ) -> CreateEmbed {
     let mut embed = CreateEmbed::new()
-        .title("🔇 Left Voice Channel")
+        .title("Left Voice Channel")
         .description(format!("**{}** left **{}**", username, channel_name))
         .color(COLOR_LEAVE);
 

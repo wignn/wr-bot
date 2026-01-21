@@ -45,10 +45,13 @@ async fn handle_video_link(
     ctx: &Context,
     message: &serenity::all::Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+
     if message.author.bot {
         return Ok(());
     }
-
+    if message.content.starts_with("!") {
+        return  Ok(())
+    }
     let url = extract_video_url(&message.content);
     if url.is_none() {
         return Ok(());
@@ -60,49 +63,76 @@ async fn handle_video_link(
         return Ok(());
     }
 
+    // Show typing indicator
     let _ = message.channel_id.broadcast_typing(&ctx.http).await;
 
-    let downloader = match Downloader::new().await {
-        Ok(dl) => dl,
-        Err(e) => {
-            println!("[VIDEO] Failed to initialize downloader: {}", e);
-            return Ok(());
-        }
-    };
+    println!("[VIDEO] Downloading from {}: {}", platform.name(), url);
+    let start_time = std::time::Instant::now();
 
-    let video_path = match downloader.download(&url).await {
+    let video_path = match Downloader::download(&url).await {
         Ok(path) => path,
         Err(e) => {
             println!("[VIDEO] Failed to download video: {}", e);
+            let _ = message.reply(&ctx.http, format!("❌ Gagal download video: {}", e)).await;
             return Ok(());
         }
     };
 
-    let file_size = std::fs::metadata(&video_path)?.len();
+    let download_time = start_time.elapsed();
+    println!("[VIDEO] Download completed in {:.2}s", download_time.as_secs_f64());
+
+    let file_size = match tokio::fs::metadata(&video_path).await {
+        Ok(meta) => meta.len(),
+        Err(e) => {
+            println!("[VIDEO] Failed to get file metadata: {}", e);
+            let _ = Downloader::delete_video(&video_path).await;
+            return Ok(());
+        }
+    };
+    
     let max_size: u64 = 25 * 1024 * 1024;
 
     if file_size > max_size {
-        let _ = Downloader::delete_video(&video_path);
-        println!("[VIDEO] Video too large: {:.2} MB", file_size as f64 / 1024.0 / 1024.0);
+        let _ = Downloader::delete_video(&video_path).await;
+        let size_mb = file_size as f64 / 1024.0 / 1024.0;
+        println!("[VIDEO] Video too large: {:.2} MB", size_mb);
+        let _ = message.reply(&ctx.http, format!("❌ Video terlalu besar ({:.1} MB). Maksimal 25 MB.", size_mb)).await;
         return Ok(());
     }
 
-    let file_data = std::fs::read(&video_path)?;
+    let file_data = match tokio::fs::read(&video_path).await {
+        Ok(data) => data,
+        Err(e) => {
+            println!("[VIDEO] Failed to read video file: {}", e);
+            let _ = Downloader::delete_video(&video_path).await;
+            return Ok(());
+        }
+    };
+    
     let attachment = CreateAttachment::bytes(file_data, "video.mp4");
 
-    let _ = message.channel_id.send_message(
+    match message.channel_id.send_message(
         &ctx.http,
         CreateMessage::new().add_file(attachment)
-    ).await;
+    ).await {
+        Ok(_) => {
+            let total_time = start_time.elapsed();
+            println!("[VIDEO] Sent successfully in {:.2}s ({:.2} MB)", 
+                total_time.as_secs_f64(), 
+                file_size as f64 / 1024.0 / 1024.0);
+        }
+        Err(e) => {
+            println!("[VIDEO] Failed to send video: {}", e);
+            let _ = message.reply(&ctx.http, format!("❌ Gagal mengirim video: {}", e)).await;
+        }
+    }
 
-    let _ = Downloader::delete_video(&video_path);
+    let _ = Downloader::delete_video(&video_path).await;
 
     Ok(())
 }
 
-/// Extract video URL from message content
 fn extract_video_url(content: &str) -> Option<String> {
-    // Simple URL extraction - look for http/https links
     for word in content.split_whitespace() {
         if word.starts_with("http://") || word.starts_with("https://") {
             let platform = Downloader::detect_platform(word);
@@ -300,12 +330,6 @@ async fn handle_member_join(
                 .map(|g| g.member_count)
                 .unwrap_or(0);
 
-            let guild_name = ctx
-                .cache
-                .guild(guild_id)
-                .map(|g| g.name.clone())
-                .unwrap_or_else(|| "Server".to_string());
-
             let account_created = new_member
                 .user
                 .created_at()
@@ -316,10 +340,9 @@ async fn handle_member_join(
             let embed_msg = embed::member_join(
                 &new_member.user.name,
                 new_member.user.id.get(),
-                &account_created,
                 member_count,
                 avatar.as_deref(),
-                &guild_name,
+                &account_created,
             );
 
             let message = CreateMessage::new().embed(embed_msg);
@@ -337,7 +360,7 @@ async fn handle_member_leave(
     ctx: &Context,
     guild_id: GuildId,
     user: &User,
-    member_data: Option<&Member>,
+    _member_data: Option<&Member>,
     data: &Data,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let db = data.db.lock().await;
@@ -348,11 +371,7 @@ async fn handle_member_leave(
     if let Ok(Some(config)) = config {
         if let Some(log_channel_id) = config.log_channel_id {
             let channel = ChannelId::new(log_channel_id);
-            let member_count = ctx
-                .cache
-                .guild(guild_id)
-                .map(|g| g.member_count)
-                .unwrap_or(0);
+
 
             let guild_name = ctx
                 .cache
@@ -360,19 +379,13 @@ async fn handle_member_leave(
                 .map(|g| g.name.clone())
                 .unwrap_or_else(|| "Server".to_string());
 
-            let joined_at = member_data
-                .and_then(|m| m.joined_at)
-                .map(|t| t.format("%Y-%m-%d %H:%M UTC").to_string());
-
             let avatar = user.avatar_url();
 
             let embed_msg = embed::member_leave(
                 &user.name,
                 user.id.get(),
-                joined_at.as_deref(),
-                member_count,
                 avatar.as_deref(),
-                &guild_name,
+                &guild_name
             );
 
             let message = CreateMessage::new().embed(embed_msg);
