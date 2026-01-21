@@ -32,7 +32,7 @@ COPY --from=builder /app/target/release/worm .
 COPY --from=builder /app/system-prompt.txt .
 COPY --from=builder /app/gemini_prompt.txt .
 
-RUN chown -R worm:worm /app
+RUN mkdir -p /app/data && chown -R worm:worm /app
 USER worm
 
 CMD ["./worm"]
