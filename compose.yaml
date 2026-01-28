@@ -46,7 +46,7 @@ services:
     user: "0:0"
     volumes:
       - ./lavalink/application.yml:/opt/Lavalink/application.yml
-      - lavalink-plugins:/opt/Lavalink/plugins
+      - ./lavalink/plugins:/opt/Lavalink/plugins
     env_file:
       - .env
     environment:
@@ -75,6 +75,3 @@ services:
 volumes:
   bot-data:
   postgres-data:
-  lavalink-plugins:
-
-
