@@ -50,8 +50,7 @@ services:
     env_file:
       - .env
     environment:
-      - _JAVA_OPTIONS=-Xmx512M
-      - JAVA_OPTS=-Djava.net.preferIPv4Stack=true
+      - _JAVA_OPTIONS=-Xmx512M -Djava.net.preferIPv4Stack=true
       - SERVER_PORT=2333
     ports:
       - "2333:2333"
