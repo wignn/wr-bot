@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE redeem_servers SET is_active = TRUE WHERE guild_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e6f2a288173302f16e4c472e7ad03f6934704c2cb5c35d7583beb1aa23e1be14"
+}

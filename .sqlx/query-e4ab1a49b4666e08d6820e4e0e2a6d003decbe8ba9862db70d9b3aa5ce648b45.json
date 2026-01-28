@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO mod_config (guild_id, auto_role_id)\n            VALUES ($1, $2)\n            ON CONFLICT(guild_id) DO UPDATE SET auto_role_id = EXCLUDED.auto_role_id\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e4ab1a49b4666e08d6820e4e0e2a6d003decbe8ba9862db70d9b3aa5ce648b45"
+}

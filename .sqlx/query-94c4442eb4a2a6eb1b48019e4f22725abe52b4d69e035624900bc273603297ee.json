@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE mod_config SET auto_role_id = NULL WHERE guild_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "94c4442eb4a2a6eb1b48019e4f22725abe52b4d69e035624900bc273603297ee"
+}

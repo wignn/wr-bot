@@ -36,12 +36,18 @@ impl GenshinCodeScraper {
         }
     }
 
-    pub async fn fetch_codes(&self) -> Result<Vec<GenshinCodeData>, Box<dyn std::error::Error>> {
+    pub async fn fetch_codes(
+        &self,
+    ) -> Result<Vec<GenshinCodeData>, Box<dyn std::error::Error + Send + Sync>> {
         println!("Fetching codes from API: {}", self.api_url);
 
-        let response = self.client
+        let response = self
+            .client
             .get(&self.api_url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .header(
+                "User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            )
             .send()
             .await?;
 

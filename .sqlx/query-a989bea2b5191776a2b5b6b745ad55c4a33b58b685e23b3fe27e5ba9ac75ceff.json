@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM reminders WHERE is_sent = TRUE AND created_at < $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a989bea2b5191776a2b5b6b745ad55c4a33b58b685e23b3fe27e5ba9ac75ceff"
+}

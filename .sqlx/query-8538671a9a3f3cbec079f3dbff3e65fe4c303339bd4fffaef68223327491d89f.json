@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO mod_config (guild_id, log_channel_id)\n            VALUES ($1, $2)\n            ON CONFLICT(guild_id) DO UPDATE SET log_channel_id = EXCLUDED.log_channel_id\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8538671a9a3f3cbec079f3dbff3e65fe4c303339bd4fffaef68223327491d89f"
+}

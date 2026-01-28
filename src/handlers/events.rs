@@ -3,7 +3,9 @@ use crate::repository::ModerationRepository;
 use crate::services::link::Downloader;
 use crate::services::music::player::get_bot_user_id;
 use crate::utils::embed;
-use serenity::all::{ChannelId, Context, CreateAttachment, CreateMessage, FullEvent, GuildId, Member, RoleId, User};
+use serenity::all::{
+    ChannelId, Context, CreateAttachment, CreateMessage, FullEvent, GuildId, Member, RoleId, User,
+};
 
 /// Main event handler for Discord events
 pub async fn handle_event(
@@ -45,12 +47,11 @@ async fn handle_video_link(
     ctx: &Context,
     message: &serenity::all::Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-
     if message.author.bot {
         return Ok(());
     }
     if message.content.starts_with("!") {
-        return  Ok(())
+        return Ok(());
     }
     let url = extract_video_url(&message.content);
     if url.is_none() {
@@ -73,13 +74,18 @@ async fn handle_video_link(
         Ok(path) => path,
         Err(e) => {
             println!("[VIDEO] Failed to download video: {}", e);
-            let _ = message.reply(&ctx.http, format!("❌ Gagal download video: {}", e)).await;
+            let _ = message
+                .reply(&ctx.http, format!("❌ Gagal download video: {}", e))
+                .await;
             return Ok(());
         }
     };
 
     let download_time = start_time.elapsed();
-    println!("[VIDEO] Download completed in {:.2}s", download_time.as_secs_f64());
+    println!(
+        "[VIDEO] Download completed in {:.2}s",
+        download_time.as_secs_f64()
+    );
 
     let file_size = match tokio::fs::metadata(&video_path).await {
         Ok(meta) => meta.len(),
@@ -89,14 +95,22 @@ async fn handle_video_link(
             return Ok(());
         }
     };
-    
+
     let max_size: u64 = 25 * 1024 * 1024;
 
     if file_size > max_size {
         let _ = Downloader::delete_video(&video_path).await;
         let size_mb = file_size as f64 / 1024.0 / 1024.0;
         println!("[VIDEO] Video too large: {:.2} MB", size_mb);
-        let _ = message.reply(&ctx.http, format!("❌ Video terlalu besar ({:.1} MB). Maksimal 25 MB.", size_mb)).await;
+        let _ = message
+            .reply(
+                &ctx.http,
+                format!(
+                    "❌ Video terlalu besar ({:.1} MB). Maksimal 25 MB.",
+                    size_mb
+                ),
+            )
+            .await;
         return Ok(());
     }
 
@@ -108,22 +122,27 @@ async fn handle_video_link(
             return Ok(());
         }
     };
-    
+
     let attachment = CreateAttachment::bytes(file_data, "video.mp4");
 
-    match message.channel_id.send_message(
-        &ctx.http,
-        CreateMessage::new().add_file(attachment)
-    ).await {
+    match message
+        .channel_id
+        .send_message(&ctx.http, CreateMessage::new().add_file(attachment))
+        .await
+    {
         Ok(_) => {
             let total_time = start_time.elapsed();
-            println!("[VIDEO] Sent successfully in {:.2}s ({:.2} MB)", 
-                total_time.as_secs_f64(), 
-                file_size as f64 / 1024.0 / 1024.0);
+            println!(
+                "[VIDEO] Sent successfully in {:.2}s ({:.2} MB)",
+                total_time.as_secs_f64(),
+                file_size as f64 / 1024.0 / 1024.0
+            );
         }
         Err(e) => {
             println!("[VIDEO] Failed to send video: {}", e);
-            let _ = message.reply(&ctx.http, format!("❌ Gagal mengirim video: {}", e)).await;
+            let _ = message
+                .reply(&ctx.http, format!("❌ Gagal mengirim video: {}", e))
+                .await;
         }
     }
 
@@ -246,14 +265,12 @@ async fn handle_voice_logging(
     new_channel: Option<ChannelId>,
     user_id: serenity::all::UserId,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let db = data.db.lock().await;
-    let conn = db.get_connection();
-    let config = ModerationRepository::get_config(conn, guild_id.get());
-    drop(db);
+    let pool = data.db.as_ref();
+    let config = ModerationRepository::get_config(pool, guild_id.get()).await;
 
     if let Ok(Some(config)) = config {
         if let Some(log_channel_id) = config.log_channel_id {
-            let log_channel = ChannelId::new(log_channel_id);
+            let log_channel = ChannelId::new(log_channel_id as u64);
             let user = ctx.http.get_user(user_id).await?;
             let avatar = user.avatar_url();
 
@@ -308,14 +325,12 @@ async fn handle_member_join(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let guild_id = new_member.guild_id;
 
-    let db = data.db.lock().await;
-    let conn = db.get_connection();
-    let config = ModerationRepository::get_config(conn, guild_id.get());
-    drop(db);
+    let pool = data.db.as_ref();
+    let config = ModerationRepository::get_config(pool, guild_id.get()).await;
 
     if let Ok(Some(config)) = config {
         if let Some(role_id) = config.auto_role_id {
-            let role = RoleId::new(role_id);
+            let role = RoleId::new(role_id as u64);
             let member = new_member.clone();
             if let Err(e) = member.add_role(&ctx.http, role).await {
                 eprintln!("[MOD] Failed to assign auto-role: {}", e);
@@ -323,7 +338,7 @@ async fn handle_member_join(
         }
 
         if let Some(log_channel_id) = config.log_channel_id {
-            let channel = ChannelId::new(log_channel_id);
+            let channel = ChannelId::new(log_channel_id as u64);
             let member_count = ctx
                 .cache
                 .guild(guild_id)
@@ -363,15 +378,12 @@ async fn handle_member_leave(
     _member_data: Option<&Member>,
     data: &Data,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let db = data.db.lock().await;
-    let conn = db.get_connection();
-    let config = ModerationRepository::get_config(conn, guild_id.get());
-    drop(db);
+    let pool = data.db.as_ref();
+    let config = ModerationRepository::get_config(pool, guild_id.get()).await;
 
     if let Ok(Some(config)) = config {
         if let Some(log_channel_id) = config.log_channel_id {
-            let channel = ChannelId::new(log_channel_id);
-
+            let channel = ChannelId::new(log_channel_id as u64);
 
             let guild_name = ctx
                 .cache
@@ -381,12 +393,8 @@ async fn handle_member_leave(
 
             let avatar = user.avatar_url();
 
-            let embed_msg = embed::member_leave(
-                &user.name,
-                user.id.get(),
-                avatar.as_deref(),
-                &guild_name
-            );
+            let embed_msg =
+                embed::member_leave(&user.name, user.id.get(), avatar.as_deref(), &guild_name);
 
             let message = CreateMessage::new().embed(embed_msg);
             if let Err(e) = channel.send_message(&ctx.http, message).await {

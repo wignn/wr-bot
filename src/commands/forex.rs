@@ -19,10 +19,8 @@ pub async fn forex_setup(
     let guild_id = ctx.guild_id().ok_or("Must be used in a guild")?.get();
     let channel_id = channel.id.get();
 
-    let db = ctx.data().db.lock().await;
-    let conn = db.get_connection();
-    ForexRepository::insert_channel(conn, guild_id, channel_id)?;
-    drop(db);
+    let pool = ctx.data().db.as_ref();
+    ForexRepository::insert_channel(pool, guild_id, channel_id).await?;
 
     let embed = CreateEmbed::default()
         .title("Forex News Setup Complete")
@@ -55,14 +53,14 @@ pub async fn forex_setup(
 pub async fn forex_disable(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or("Must be used in a guild")?.get();
 
-    let db = ctx.data().db.lock().await;
-    let conn = db.get_connection();
-    ForexRepository::disable_channel(conn, guild_id)?;
-    drop(db);
+    let pool = ctx.data().db.as_ref();
+    ForexRepository::disable_channel(pool, guild_id).await?;
 
     let embed = CreateEmbed::default()
         .title("Forex News Disabled")
-        .description("Forex news notifications have been disabled.\n\nUse `/forex_setup` to enable again.")
+        .description(
+            "Forex news notifications have been disabled.\n\nUse `/forex_setup` to enable again.",
+        )
         .color(serenity::Colour::from_rgb(158, 158, 158))
         .timestamp(Timestamp::now());
 
@@ -80,10 +78,8 @@ pub async fn forex_disable(ctx: Context<'_>) -> Result<(), Error> {
 pub async fn forex_enable(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or("Must be used in a guild")?.get();
 
-    let db = ctx.data().db.lock().await;
-    let conn = db.get_connection();
-    ForexRepository::enable_channel(conn, guild_id)?;
-    drop(db);
+    let pool = ctx.data().db.as_ref();
+    ForexRepository::enable_channel(pool, guild_id).await?;
 
     let embed = CreateEmbed::default()
         .title("Forex News Enabled")
@@ -100,10 +96,8 @@ pub async fn forex_enable(ctx: Context<'_>) -> Result<(), Error> {
 pub async fn forex_status(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or("Must be used in a guild")?.get();
 
-    let db = ctx.data().db.lock().await;
-    let conn = db.get_connection();
-    let channel = ForexRepository::get_channel(conn, guild_id)?;
-    drop(db);
+    let pool = ctx.data().db.as_ref();
+    let channel = ForexRepository::get_channel(pool, guild_id).await?;
 
     let embed = match channel {
         Some(ch) => {
@@ -121,13 +115,11 @@ pub async fn forex_status(ctx: Context<'_>) -> Result<(), Error> {
                 .color(color)
                 .timestamp(Timestamp::now())
         }
-        None => {
-            CreateEmbed::default()
-                .title("Forex News Status")
-                .description("Not configured. Use `/forex_setup` to enable.")
-                .color(serenity::Colour::from_rgb(158, 158, 158))
-                .timestamp(Timestamp::now())
-        }
+        None => CreateEmbed::default()
+            .title("Forex News Status")
+            .description("Not configured. Use `/forex_setup` to enable.")
+            .color(serenity::Colour::from_rgb(158, 158, 158))
+            .timestamp(Timestamp::now()),
     };
 
     ctx.send(poise::CreateReply::default().embed(embed)).await?;
@@ -158,7 +150,8 @@ pub async fn forex_calendar(ctx: Context<'_>) -> Result<(), Error> {
                 if let Some(arr) = events.as_array() {
                     for event in arr {
                         let impact = event["impact"].as_str().unwrap_or_default();
-                        if impact.to_lowercase().contains("high") || impact.to_lowercase() == "red" {
+                        if impact.to_lowercase().contains("high") || impact.to_lowercase() == "red"
+                        {
                             let title = event["title"].as_str().unwrap_or_default();
                             let country = event["country"].as_str().unwrap_or_default();
                             let date = event["date"].as_str().unwrap_or_default();
@@ -180,7 +173,9 @@ pub async fn forex_calendar(ctx: Context<'_>) -> Result<(), Error> {
 
                             high_impact_events.push(format!(
                                 "**{}**  `{}`\n{}\nForecast: `{}` | Previous: `{}`",
-                                currency, date, title,
+                                currency,
+                                date,
+                                title,
                                 if forecast.is_empty() { "—" } else { forecast },
                                 if previous.is_empty() { "—" } else { previous }
                             ));

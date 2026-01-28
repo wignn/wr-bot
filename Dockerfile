@@ -12,9 +12,15 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs
 RUN cargo build --release || true
 RUN rm -rf src
 
+COPY .sqlx ./.sqlx
+
+COPY migrations ./migrations
+
 COPY src ./src
+
 COPY system-prompt.txt gemini_prompt.txt ./
 
+ENV SQLX_OFFLINE=true
 RUN cargo build --release
 
 FROM debian:bookworm-slim

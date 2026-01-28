@@ -1,35 +1,16 @@
-use rusqlite::{Connection, Result};
+use sqlx::{PgPool, postgres::PgPoolOptions};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
-use crate::repository::moderation::ModerationRepository;
-use crate::repository::redeem::{verify_tables, RedeemRepository};
-use crate::repository::reminder::ReminderRepository;
+pub type DbPool = Arc<PgPool>;
 
-#[derive(Debug)]
-pub struct DbConnection {
-    conn: Connection,
-}
+pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .connect(database_url)
+        .await?;
 
-impl DbConnection {
-    pub fn new(db_path: &str) -> Result<Self> {
-        let conn = Connection::open(db_path)?;
-        RedeemRepository::init_tables(&conn)?;
-        ReminderRepository::init_tables(&conn)?;
-        ModerationRepository::init_tables(&conn)?;
-        verify_tables(&conn)?;
-        println!("Database tables initialized and verified");
-        Ok(Self { conn })
-    }
+    sqlx::migrate!("./migrations").run(&pool).await?;
 
-    pub fn get_connection(&self) -> &Connection {
-        &self.conn
-    }
-}
-
-pub type DbPool = Arc<Mutex<DbConnection>>;
-
-pub fn create_pool(db_path: &str) -> Result<DbPool> {
-    let conn = DbConnection::new(db_path)?;
-    Ok(Arc::new(Mutex::new(conn)))
+    println!("[OK] Database connected and migrations applied");
+    Ok(Arc::new(pool))
 }

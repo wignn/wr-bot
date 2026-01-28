@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE forex_channels SET is_active = FALSE WHERE guild_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9916ed7be567ffb8f062c8811ee29fd324b408523d5e282097e5e27e9cad5bb8"
+}

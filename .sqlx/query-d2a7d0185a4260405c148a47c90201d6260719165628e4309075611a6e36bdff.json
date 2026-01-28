@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO reminders (user_id, guild_id, channel_id, message, remind_at, created_at, is_sent)\n            VALUES ($1, $2, $3, $4, $5, $6, FALSE)\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d2a7d0185a4260405c148a47c90201d6260719165628e4309075611a6e36bdff"
+}

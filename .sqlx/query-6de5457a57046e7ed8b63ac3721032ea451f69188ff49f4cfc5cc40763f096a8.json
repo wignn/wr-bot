@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO forex_news_sent (news_id, source, sent_at)\n            VALUES ($1, $2, $3)\n            ON CONFLICT(news_id) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6de5457a57046e7ed8b63ac3721032ea451f69188ff49f4cfc5cc40763f096a8"
+}

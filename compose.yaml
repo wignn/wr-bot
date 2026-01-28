@@ -7,14 +7,37 @@ services:
     image: wign/bot-discord:latest
     restart: unless-stopped
     volumes:
-      - bot-data:/app/data # Persist database
+      - bot-data:/app/data
     environment:
       - RUST_LOG=info
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/wrbot
     env_file:
       - .env
     tty: true
     depends_on:
-      - lavalink
+      postgres:
+        condition: service_healthy
+      lavalink:
+        condition: service_started
+
+  postgres:
+    container_name: postgres
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=wrbot
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d wrbot" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   lavalink:
     container_name: lavalink
@@ -37,6 +60,21 @@ services:
       timeout: 10s
       retries: 3
 
+  pgweb:
+    container_name: pgweb
+    image: sosedoff/pgweb:latest
+    restart: unless-stopped
+    environment:
+      - PGWEB_DATABASE_URL=postgres://readonly:readonly@postgres:5432/wrbot?sslmode=disable
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   bot-data:
+  postgres-data:
   lavalink-plugins:
+
+

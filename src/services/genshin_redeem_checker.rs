@@ -1,8 +1,8 @@
 use crate::repository::{DbPool, RedeemRepository};
-use serenity::all::{ChannelId, CreateEmbed, CreateMessage, Http, Color};
-use std::sync::Arc;
-use tokio::time::{interval, Duration};
 use crate::scraper::genshin::{GenshinCodeData, GenshinCodeScraper};
+use serenity::all::{ChannelId, Color, CreateEmbed, CreateMessage, Http};
+use std::sync::Arc;
+use tokio::time::{Duration, interval};
 
 pub struct CodeCheckerService {
     scraper: GenshinCodeScraper,
@@ -17,7 +17,7 @@ impl CodeCheckerService {
             scraper: GenshinCodeScraper::new(),
             db,
             http,
-            check_interval_secs: 300, 
+            check_interval_secs: 300,
         }
     }
 
@@ -33,7 +33,7 @@ impl CodeCheckerService {
         }
     }
 
-    async fn check_for_new_codes(&self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn check_for_new_codes(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("Checking for new Genshin codes...");
 
         let current_codes = self.scraper.fetch_codes().await?;
@@ -43,34 +43,29 @@ impl CodeCheckerService {
             return Ok(());
         }
 
-        let db_lock = self.db.lock().await;
-        let conn = db_lock.get_connection();
+        let pool = self.db.as_ref();
 
         let mut new_codes = Vec::new();
         for code_data in &current_codes {
-            if !RedeemRepository::is_code_sent(conn, &code_data.code)? {
+            if !RedeemRepository::is_code_sent(pool, &code_data.code).await? {
                 new_codes.push(code_data);
             }
         }
-
-        drop(db_lock);
 
         if !new_codes.is_empty() {
             println!("Found {} new code(s)!", new_codes.len());
 
             self.notify_new_codes(&new_codes).await?;
 
-            let db_lock = self.db.lock().await;
-            let conn = db_lock.get_connection();
-
             for code in &new_codes {
                 RedeemRepository::insert_code(
-                    conn,
+                    pool,
                     "genshin",
                     &code.code,
                     Some(&code.rewards),
                     None,
-                )?;
+                )
+                .await?;
                 println!("Saved code to database: {}", code.code);
             }
         } else {
@@ -80,11 +75,12 @@ impl CodeCheckerService {
         Ok(())
     }
 
-    async fn notify_new_codes(&self, new_codes: &[&GenshinCodeData]) -> Result<(), Box<dyn std::error::Error>> {
-        let db_lock = self.db.lock().await;
-        let conn = db_lock.get_connection();
-        let servers = RedeemRepository::get_active_servers(conn, "genshin")?;
-        drop(db_lock);
+    async fn notify_new_codes(
+        &self,
+        new_codes: &[&GenshinCodeData],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let pool = self.db.as_ref();
+        let servers = RedeemRepository::get_active_servers(pool, "genshin").await?;
 
         if servers.is_empty() {
             println!("No active servers configured for notifications");
@@ -94,18 +90,18 @@ impl CodeCheckerService {
         println!("Sending notifications to {} server(s)", servers.len());
 
         for server in servers {
-            if let Err(e) = self.send_notification(server.channel_id, new_codes).await {
+            if let Err(e) = self
+                .send_notification(server.channel_id as u64, new_codes)
+                .await
+            {
                 eprintln!(
                     "Failed to send notification to channel {} (guild {}): {}",
-                    server.channel_id,
-                    server.guild_id,
-                    e
+                    server.channel_id, server.guild_id, e
                 );
             } else {
                 println!(
                     "Successfully sent notification to guild {} (channel {})",
-                    server.guild_id,
-                    server.channel_id
+                    server.guild_id, server.channel_id
                 );
             }
         }
@@ -113,7 +109,11 @@ impl CodeCheckerService {
         Ok(())
     }
 
-    async fn send_notification(&self, channel_id: u64, codes: &[&GenshinCodeData]) -> Result<(), Box<dyn std::error::Error>> {
+    async fn send_notification(
+        &self,
+        channel_id: u64,
+        codes: &[&GenshinCodeData],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let channel = ChannelId::new(channel_id);
 
         for code in codes {
@@ -132,12 +132,12 @@ impl CodeCheckerService {
                 .color(Color::from_rgb(91, 206, 250))
                 .field("Rewards", &code.rewards, false)
                 .field("Status", &code.status, true)
-                .footer(serenity::all::CreateEmbedFooter::new("Auto-detected by Redeem Bot"))
+                .footer(serenity::all::CreateEmbedFooter::new(
+                    "Auto-detected by Redeem Bot",
+                ))
                 .timestamp(serenity::model::Timestamp::now());
 
-            let message = CreateMessage::new()
-                .content("@here")
-                .embed(embed);
+            let message = CreateMessage::new().content("@here").embed(embed);
 
             channel.send_message(&self.http, message).await?;
 
@@ -148,10 +148,7 @@ impl CodeCheckerService {
     }
 }
 
-pub async fn start_code_checker(
-    db: DbPool,
-    http: Arc<Http>,
-) {
+pub async fn start_code_checker(db: DbPool, http: Arc<Http>) {
     let checker = Arc::new(CodeCheckerService::new(db, http));
 
     tokio::spawn(async move {

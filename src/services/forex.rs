@@ -1,16 +1,18 @@
-use crate::repository::{DbPool, ForexRepository};
 use crate::config::Config;
+use crate::repository::{DbPool, ForexRepository};
 use chrono::{DateTime, Utc};
 use chrono_tz::Asia::Jakarta;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serenity::all::{ChannelId, Color, CreateEmbed, CreateEmbedFooter, CreateMessage, Http};
 use std::sync::Arc;
-use tokio::time::{interval, Duration};
+use tokio::time::{Duration, interval};
 
 const FXSTREET_RSS: &str = "https://www.fxstreet-id.com/rss/news";
 const FXSTREET_ANALYSIS_RSS: &str = "https://www.fxstreet-id.com/rss/analysis";
-const DAILY_FOREX: &str ="https://www.dailyforex.com/rss/technicalanalysis.xml";
+const DAILY_FOREX: &str = "https://www.dailyforex.com/rss/technicalanalysis.xml";
+const WSJ_WORLD_NEWS_RSS: &str = "https://feeds.content.dowjones.io/public/rss/RSSWorldNews";
+const WSJ_MARKETS_RSS: &str = "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain";
 
 #[derive(Serialize)]
 struct GeminiRequest {
@@ -101,16 +103,14 @@ pub struct ForexService {
 
 impl ForexService {
     pub fn new(db: DbPool, http: Arc<Http>) -> Self {
-        let gemini_api_key = Config::from_env()
-            .ok()
-            .and_then(|c| {
-                if c.gemini_api_key != "api_key" {
-                    Some(c.gemini_api_key)
-                } else {
-                    None
-                }
-            });
-        
+        let gemini_api_key = Config::from_env().ok().and_then(|c| {
+            if c.gemini_api_key != "api_key" {
+                Some(c.gemini_api_key)
+            } else {
+                None
+            }
+        });
+
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(30))
@@ -140,62 +140,72 @@ impl ForexService {
 
     async fn check_for_news(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut all_news = Vec::new();
-        
+
         match self.fetch_fxstreet().await {
             Ok(news) => all_news.extend(news),
             Err(e) => eprintln!("[FOREX] Error fetching FXStreet News: {}", e),
         }
-        
+
         match self.fetch_fxstreet_analysis().await {
             Ok(news) => all_news.extend(news),
             Err(e) => eprintln!("[FOREX] Error fetching FXStreet Analysis: {}", e),
         }
-        
+
         match self.fetch_dailyforex().await {
             Ok(news) => all_news.extend(news),
             Err(e) => eprintln!("[FOREX] Error fetching DailyForex: {}", e),
+        }
+
+        match self.fetch_wsj_world_news().await {
+            Ok(news) => all_news.extend(news),
+            Err(e) => eprintln!("[FOREX] Error fetching WSJ World News: {}", e),
+        }
+
+        match self.fetch_wsj_markets().await {
+            Ok(news) => all_news.extend(news),
+            Err(e) => eprintln!("[FOREX] Error fetching WSJ Markets: {}", e),
         }
 
         if all_news.is_empty() {
             return Ok(());
         }
 
-        let db_lock = self.db.lock().await;
-        let conn = db_lock.get_connection();
+        let pool = self.db.as_ref();
 
         let mut new_items = Vec::new();
         for item in &all_news {
-            if !ForexRepository::is_news_sent(conn, &item.id)? {
+            if !ForexRepository::is_news_sent(pool, &item.id).await? {
                 new_items.push(item.clone());
             }
         }
-
-        drop(db_lock);
 
         if !new_items.is_empty() {
             println!("[FOREX] Found {} new item(s)", new_items.len());
 
             self.notify_news(&new_items).await?;
 
-            let db_lock = self.db.lock().await;
-            let conn = db_lock.get_connection();
-
             for item in &new_items {
-                let source = if item.id.starts_with("dailyforex") { 
-                    "DailyForex" 
+                let source = if item.id.starts_with("wsj_world") {
+                    "WSJ World News"
+                } else if item.id.starts_with("wsj_markets") {
+                    "WSJ Markets"
+                } else if item.id.starts_with("dailyforex") {
+                    "DailyForex"
                 } else if item.id.starts_with("fxstreet_analysis") {
                     "FXStreet Analysis"
-                } else { 
-                    "FXStreet" 
+                } else {
+                    "FXStreet"
                 };
-                ForexRepository::insert_news(conn, &item.id, source)?;
+                ForexRepository::insert_news(pool, &item.id, source).await?;
             }
         }
 
         Ok(())
     }
 
-    async fn fetch_fxstreet(&self) -> Result<Vec<ForexNews>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn fetch_fxstreet(
+        &self,
+    ) -> Result<Vec<ForexNews>, Box<dyn std::error::Error + Send + Sync>> {
         let response = self.client.get(FXSTREET_RSS).send().await?;
         let body = response.text().await?;
 
@@ -234,7 +244,9 @@ impl ForexService {
         Ok(news)
     }
 
-    async fn fetch_fxstreet_analysis(&self) -> Result<Vec<ForexNews>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn fetch_fxstreet_analysis(
+        &self,
+    ) -> Result<Vec<ForexNews>, Box<dyn std::error::Error + Send + Sync>> {
         let response = self.client.get(FXSTREET_ANALYSIS_RSS).send().await?;
         let body = response.text().await?;
 
@@ -273,7 +285,9 @@ impl ForexService {
         Ok(news)
     }
 
-    async fn fetch_dailyforex(&self) -> Result<Vec<ForexNews>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn fetch_dailyforex(
+        &self,
+    ) -> Result<Vec<ForexNews>, Box<dyn std::error::Error + Send + Sync>> {
         let response = self.client.get(DAILY_FOREX).send().await?;
         let body = response.text().await?;
 
@@ -295,9 +309,13 @@ impl ForexService {
                 .map(|dt| dt.with_timezone(&Utc));
 
             let (translated_title, translated_desc) = if self.gemini_api_key.is_some() {
-                let t_title = self.translate_to_indonesian(&title).await
+                let t_title = self
+                    .translate_to_indonesian(&title)
+                    .await
                     .unwrap_or_else(|_| Self::clean_html(&title));
-                let t_desc = self.translate_to_indonesian(&description).await
+                let t_desc = self
+                    .translate_to_indonesian(&description)
+                    .await
                     .unwrap_or_else(|_| Self::clean_html(&description));
                 (t_title, t_desc)
             } else {
@@ -319,8 +337,95 @@ impl ForexService {
         Ok(news)
     }
 
-    async fn translate_to_indonesian(&self, text: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        let api_key = self.gemini_api_key.as_ref()
+    async fn fetch_wsj_world_news(
+        &self,
+    ) -> Result<Vec<ForexNews>, Box<dyn std::error::Error + Send + Sync>> {
+        let response = self.client.get(WSJ_WORLD_NEWS_RSS).send().await?;
+        let body = response.text().await?;
+
+        let channel = rss::Channel::read_from(body.as_bytes())?;
+        let mut news = Vec::new();
+
+        for item in channel.items().iter().take(10) {
+            let title = item.title().unwrap_or_default().to_string();
+            let description = item.description().unwrap_or_default().to_string();
+            let link = item.link().map(|s| s.to_string());
+            let guid = item
+                .guid()
+                .map(|g| g.value().to_string())
+                .unwrap_or_else(|| title.clone());
+
+            let currency = Self::extract_currency(&title);
+            let impact = Self::determine_impact(&title, &description);
+
+            let time = item
+                .pub_date()
+                .and_then(|d| DateTime::parse_from_rfc2822(d).ok())
+                .map(|dt| dt.with_timezone(&Utc));
+
+            news.push(ForexNews {
+                title: Self::clean_html(&title),
+                description: Self::clean_html(&description),
+                currency,
+                impact,
+                time,
+                link,
+                id: format!("wsj_world_{}", Self::hash_string(&guid)),
+            });
+        }
+
+        println!("[FOREX] Fetched {} news from WSJ World News", news.len());
+        Ok(news)
+    }
+
+    async fn fetch_wsj_markets(
+        &self,
+    ) -> Result<Vec<ForexNews>, Box<dyn std::error::Error + Send + Sync>> {
+        let response = self.client.get(WSJ_MARKETS_RSS).send().await?;
+        let body = response.text().await?;
+
+        let channel = rss::Channel::read_from(body.as_bytes())?;
+        let mut news = Vec::new();
+
+        for item in channel.items().iter().take(10) {
+            let title = item.title().unwrap_or_default().to_string();
+            let description = item.description().unwrap_or_default().to_string();
+            let link = item.link().map(|s| s.to_string());
+            let guid = item
+                .guid()
+                .map(|g| g.value().to_string())
+                .unwrap_or_else(|| title.clone());
+
+            let currency = Self::extract_currency(&title);
+            let impact = Self::determine_impact(&title, &description);
+
+            let time = item
+                .pub_date()
+                .and_then(|d| DateTime::parse_from_rfc2822(d).ok())
+                .map(|dt| dt.with_timezone(&Utc));
+
+            news.push(ForexNews {
+                title: Self::clean_html(&title),
+                description: Self::clean_html(&description),
+                currency,
+                impact,
+                time,
+                link,
+                id: format!("wsj_markets_{}", Self::hash_string(&guid)),
+            });
+        }
+
+        println!("[FOREX] Fetched {} news from WSJ Markets", news.len());
+        Ok(news)
+    }
+
+    async fn translate_to_indonesian(
+        &self,
+        text: &str,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let api_key = self
+            .gemini_api_key
+            .as_ref()
             .ok_or("Gemini API key not configured")?;
 
         let prompt = format!(
@@ -339,11 +444,7 @@ impl ForexService {
             api_key
         );
 
-        let response = self.client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&request).send().await?;
 
         let gemini_response: GeminiResponse = response.json().await?;
 
@@ -357,11 +458,12 @@ impl ForexService {
         Ok(Self::clean_html(&translated))
     }
 
-    async fn notify_news(&self, news: &[ForexNews]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let db_lock = self.db.lock().await;
-        let conn = db_lock.get_connection();
-        let channels = ForexRepository::get_active_channels(conn)?;
-        drop(db_lock);
+    async fn notify_news(
+        &self,
+        news: &[ForexNews],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let pool = self.db.as_ref();
+        let channels = ForexRepository::get_active_channels(pool).await?;
 
         if channels.is_empty() {
             println!("[FOREX] No active channels configured");
@@ -372,7 +474,10 @@ impl ForexService {
 
         for channel in channels {
             for item in news {
-                if let Err(e) = self.send_notification(channel.channel_id, item).await {
+                if let Err(e) = self
+                    .send_notification(channel.channel_id as u64, item)
+                    .await
+                {
                     eprintln!("[FOREX] Failed to send to {}: {}", channel.channel_id, e);
                 }
                 tokio::time::sleep(Duration::from_millis(800)).await;
@@ -405,26 +510,25 @@ impl ForexService {
 
         let is_dailyforex = news.id.starts_with("dailyforex");
         let is_fxstreet_analysis = news.id.starts_with("fxstreet_analysis");
-        let source_name = if is_dailyforex { 
-            "DailyForex" 
+        let is_wsj_world = news.id.starts_with("wsj_world");
+        let is_wsj_markets = news.id.starts_with("wsj_markets");
+        let source_name = if is_wsj_world {
+            "WSJ World News"
+        } else if is_wsj_markets {
+            "WSJ Markets"
+        } else if is_dailyforex {
+            "DailyForex"
         } else if is_fxstreet_analysis {
             "FXStreet"
-        } else { 
-            "FXStreet" 
+        } else {
+            "FXStreet"
         };
-        
+
         let source_link = news
             .link
             .as_ref()
             .map(|l| format!("[Baca Selengkapnya]({})", l))
             .unwrap_or_else(|| source_name.to_string());
-
-        // Different title for analysis vs news
-        // let embed_title = if is_dailyforex || is_fxstreet_analysis {
-        //     format!("{} TECHNICAL ANALYSIS", news.impact.label())
-        // } else {
-        //     format!("{} FOREX NEWS", news.impact.label())
-        // };
 
         let embed = CreateEmbed::new()
             .title(&news.title)
@@ -434,7 +538,10 @@ impl ForexService {
             .field("Time", &time_str, true)
             .field("Impact", news.impact.bar(), true)
             .field("Source", &source_link, false)
-            .footer(CreateEmbedFooter::new(format!("Forex Alert • {}", source_name)))
+            .footer(CreateEmbedFooter::new(format!(
+                "Forex Alert • {}",
+                source_name
+            )))
             .timestamp(serenity::all::Timestamp::now());
 
         let message = CreateMessage::new().embed(embed);
@@ -713,15 +820,6 @@ impl ForexService {
 
 /// Start the forex news service
 pub async fn start_forex_service(db: DbPool, http: Arc<Http>) {
-    {
-        let db_lock = db.lock().await;
-        let conn = db_lock.get_connection();
-        if let Err(e) = ForexRepository::init_tables(conn) {
-            eprintln!("[FOREX] Failed to initialize tables: {}", e);
-            return;
-        }
-    }
-
     let service = Arc::new(ForexService::new(db, http));
     tokio::spawn(async move {
         service.start_monitoring().await;

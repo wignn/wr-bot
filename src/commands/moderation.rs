@@ -48,18 +48,17 @@ pub async fn warn(
         return Ok(());
     }
 
-    let db = ctx.data().db.lock().await;
-    let conn = db.get_connection();
+    let pool = ctx.data().db.as_ref();
     ModerationRepository::add_warning(
-        conn,
+        pool,
         guild_id.get(),
         user.user.id.get(),
         moderator.id.get(),
         &reason,
-    )?;
+    )
+    .await?;
     let warn_count =
-        ModerationRepository::get_warning_count(conn, guild_id.get(), user.user.id.get())?;
-    drop(db);
+        ModerationRepository::get_warning_count(pool, guild_id.get(), user.user.id.get()).await?;
 
     let embed = CreateEmbed::new()
         .title("⚠️ User Warned")
@@ -92,10 +91,9 @@ pub async fn warnings(
 ) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or("Must be used in a guild")?;
 
-    let db = ctx.data().db.lock().await;
-    let conn = db.get_connection();
-    let warns = ModerationRepository::get_warnings(conn, guild_id.get(), user.user.id.get())?;
-    drop(db);
+    let pool = ctx.data().db.as_ref();
+    let warns =
+        ModerationRepository::get_warnings(pool, guild_id.get(), user.user.id.get()).await?;
 
     if warns.is_empty() {
         let embed = CreateEmbed::new()
@@ -116,9 +114,7 @@ pub async fn warnings(
                 i + 1,
                 w.id,
                 w.reason,
-                chrono::DateTime::parse_from_rfc3339(&w.created_at)
-                    .map(|dt| dt.timestamp())
-                    .unwrap_or(0)
+                w.created_at.timestamp()
             )
         })
         .collect::<Vec<_>>()
@@ -150,10 +146,9 @@ pub async fn clearwarnings(
 ) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or("Must be used in a guild")?;
 
-    let db = ctx.data().db.lock().await;
-    let conn = db.get_connection();
-    let cleared = ModerationRepository::clear_warnings(conn, guild_id.get(), user.user.id.get())?;
-    drop(db);
+    let pool = ctx.data().db.as_ref();
+    let cleared =
+        ModerationRepository::clear_warnings(pool, guild_id.get(), user.user.id.get()).await?;
 
     let embed = CreateEmbed::new()
         .title("Warnings Cleared")
@@ -358,10 +353,8 @@ pub async fn autorole_set(
 ) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or("Must be used in a guild")?;
 
-    let db = ctx.data().db.lock().await;
-    let conn = db.get_connection();
-    ModerationRepository::set_auto_role(conn, guild_id.get(), role.id.get())?;
-    drop(db);
+    let pool = ctx.data().db.as_ref();
+    ModerationRepository::set_auto_role(pool, guild_id.get(), role.id.get()).await?;
 
     let embed = CreateEmbed::new()
         .title("Auto-Role Set")
@@ -385,10 +378,8 @@ pub async fn autorole_set(
 pub async fn autorole_disable(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or("Must be used in a guild")?;
 
-    let db = ctx.data().db.lock().await;
-    let conn = db.get_connection();
-    ModerationRepository::disable_auto_role(conn, guild_id.get())?;
-    drop(db);
+    let pool = ctx.data().db.as_ref();
+    ModerationRepository::disable_auto_role(pool, guild_id.get()).await?;
 
     let embed = CreateEmbed::new()
         .title("Auto-Role Disabled")
@@ -412,10 +403,8 @@ pub async fn log_setup(
 ) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or("Must be used in a guild")?;
 
-    let db = ctx.data().db.lock().await;
-    let conn = db.get_connection();
-    ModerationRepository::set_log_channel(conn, guild_id.get(), channel.id.get())?;
-    drop(db);
+    let pool = ctx.data().db.as_ref();
+    ModerationRepository::set_log_channel(pool, guild_id.get(), channel.id.get()).await?;
 
     let embed = CreateEmbed::new()
         .title("Logging Enabled")
@@ -439,10 +428,8 @@ pub async fn log_setup(
 pub async fn log_disable(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or("Must be used in a guild")?;
 
-    let db = ctx.data().db.lock().await;
-    let conn = db.get_connection();
-    ModerationRepository::disable_logging(conn, guild_id.get())?;
-    drop(db);
+    let pool = ctx.data().db.as_ref();
+    ModerationRepository::disable_logging(pool, guild_id.get()).await?;
 
     let embed = CreateEmbed::new()
         .title("Logging Disabled")

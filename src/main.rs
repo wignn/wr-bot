@@ -42,8 +42,12 @@ async fn main() -> Result<(), BotError> {
     let mut owners = HashSet::new();
     owners.insert(UserId::new(owner_id));
 
-    let _ = std::fs::create_dir_all("data");
-    let db = create_pool("data/redeem_bot.db")
+    // Get database URL from environment
+    let database_url = env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/wrbot".to_string());
+
+    let db = create_pool(&database_url)
+        .await
         .map_err(|e| BotError::Config(format!("Failed to initialize database: {}", e)))?;
 
     println!("[OK] Database initialized successfully");
@@ -201,7 +205,7 @@ async fn main() -> Result<(), BotError> {
                 if let Ok(tiingo_key) = env::var("TIINGO_API_KEY") {
                     let tiingo = Arc::new(TiingoService::new(tiingo_key));
                     worm::services::tiingo::init_global_tiingo(tiingo.clone());
-                
+
                     let http_for_tiingo = ctx.http.clone();
                     tokio::spawn(async move {
                         tiingo.start_price_polling(http_for_tiingo).await;

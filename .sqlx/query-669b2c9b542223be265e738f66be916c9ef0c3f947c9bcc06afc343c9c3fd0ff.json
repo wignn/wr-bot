@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM forex_news_sent WHERE sent_at < $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "669b2c9b542223be265e738f66be916c9ef0c3f947c9bcc06afc343c9c3fd0ff"
+}

@@ -30,7 +30,7 @@ impl std::fmt::Debug for Data {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Data")
             .field("owners", &self.owners)
-            .field("db", &self.db)
+            .field("db", &"Arc<PgPool>")
             .field("music_player", &self.music_player)
             .field("songbird", &"Arc<Songbird>")
             .field("youtube_search", &self.youtube_search.is_some())
